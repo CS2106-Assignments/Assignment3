@@ -36,6 +36,11 @@ int openFile(const char *filename, unsigned char mode)
     _oft->openMode = mode;
     unsigned int inodeId = findFile(filename);
     if (inodeId != FS_FILE_NOT_FOUND) { // File exist we just return
+        char *mode = getFileMode(_oft->openMode);
+        FILE *fp = fopen(filename,mode);
+        if (fp == NULL) {
+            return -1;
+        }
         _oft->inode = inodeId;
         _oft->writePtr = 0;
         _oft->readPtr = 0;
@@ -73,6 +78,8 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
         return;
     }
     _oft->inode = fp;
+    char *mode = getFileMode(_oft->openMode);
+    FILE *fd = fdopen(fp,mode); 
     loadInode(_oft->inodeBuffer, fp);
     if (_oft->openMode != MODE_READ_APPEND) {
         unsigned int totalData = dataSize * dataCount;
@@ -81,9 +88,9 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
             numBlocksReq += 1;
         }
         int i;
-        for (i = 0; i < numBlockReq; i++) {
-            unsigned long len = fread((char*)_oft->buffer, sizeof(char), _fs->blockSize, fp);
-            if (len < _fs->blockSize0 {
+        for (i = 0; i < numBlocksReq; i++) {
+            unsigned long len = fread((char*)_oft->buffer, sizeof(char), _fs->blockSize, fd);
+            if (len < _fs->blockSize) {
                 continue;
             }
             if (_oft->inodeBuffer[i] == UNASSIGNED_BLOCK) { // Inode without block numbers
@@ -108,6 +115,7 @@ void flushFile(int fp)
     unsigned long freeBlock = findFreeBlock();
     markBlockBusy(freeBlock);
     writeBlock(_oft->buffer, freeBlock);
+
     updateFreeList();
     updateDirectory();
 }
@@ -117,9 +125,11 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
 {
     _oft->inode = fp;
     loadInode(_oft->inodeBuffer, fp);
+    char *mode = getFileMode(_oft->openMode);
+    FILE *fd = fdopen(fp, mode);
     while (_oft->inodeBuffer[_oft->readPtr] != UNASSIGNED_BLOCK) {
-        readBlock(_oft->buffer, _oft->inodeBuffer[oft->readPtr]);
-        fwrite(buffer, sizeof(char), _fs->blockSize, fp);
+        readBlock(_oft->buffer, _oft->inodeBuffer[_oft->readPtr]);
+        fwrite(buffer, sizeof(char), _fs->blockSize, fd);
         _oft->readPtr += 1;
     }
 }
@@ -134,15 +144,42 @@ void delFile(const char *filename) {
 
     _oft->inode = inodeId;
     loadInode(_oft->inodeBuffer, inodeId);
-    unsigned int attr = getAttr(filename);
+    unsigned int attr = getattr(filename);
     if (CHECK_BIT(attr,2)) {  
         return;
     }
+    int i = 0;
+    while (_oft->inodeBuffer[i] != UNASSIGNED_BLOCK) {
+        markBlockFree(_oft->inodeBuffer[i]);
+    }
+    delDirectoryEntry(filename);
+    updateFreeList();
+    updateDirectory();
 }
 
 // Close a file. Flushes all data buffers, updates inode, directory, etc.
-void closeFile(int fp);
+void closeFile(int fp) {
+    char *mode = getFileMode(_oft->openMode);
+    FILE *fd = fdopen(fp, mode);
+    fclose(fd);
+    flushFile(fp);
+}
 
 // Unmount file system.
-void closeFS();
+void closeFS() {
+    unmountFS();
+    free(_oft->buffer);
+    free(_oft->inodeBuffer);
+}
 
+char *getFileMode(unsigned int openMode) {
+    char *mode;
+    if (openMode == MODE_READ_ONLY) {
+        mode = "r";
+    } else if (openMode == MODE_READ_APPEND) {
+        mode = "ab+";
+    } else {
+        mode = "w";
+    }
+    return mode;
+}
