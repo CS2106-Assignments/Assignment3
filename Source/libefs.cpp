@@ -12,7 +12,7 @@ TOpenFile *_oft;
 // Open file table counter
 int _oftCount=0;
 
-void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr);
+void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char* filename);
 char *getFileMode(unsigned int openMode); 
 
 // Mounts a paritition given in fsPartitionName. Must be called before all
@@ -34,12 +34,12 @@ int openFile(const char *filename, unsigned char mode)
     int fileIdx = findFile(filename);
     if (_result != FS_FILE_NOT_FOUND) { // If found
         // Update oft
-        updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0);
+        updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
         return _oftCount;
     }
     if (mode == MODE_CREATE) { // Create a file if mode is MODE_CREATE
         fileIdx = makeDirectoryEntry(filename, 0x0, 0);
-        updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0);
+        updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
         unsigned long freeBlock = findFreeBlock();
         if (_result == FS_FULL) { // ERROR when disk is full
             return -1;
@@ -57,7 +57,7 @@ int openFile(const char *filename, unsigned char mode)
     return -1;
 }
 
-void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr) {
+void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char * filename) {
     // Update oft
     _oft[_oftCount].openMode = openMode;
     _oft[_oftCount].blockSize = blockSize;
@@ -67,12 +67,39 @@ void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsig
     _oft[_oftCount].writePtr = writePtr;
     _oft[_oftCount].readPtr = readPtr;
     _oft[_oftCount].filePtr = filePtr;
+    _oft[_oftCount].filename = filename;
 }
 
 // Write data to the file. File must be opened in MODE_NORMAL or MODE_CREATE modes. Does nothing
 // if file is opened in MODE_READ_ONLY mode.
 void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
 {
+    if (_oft[fp].openMode == MODE_READ_ONLY) {
+        return;
+    }
+    int totalSize = dataSize * dataCount;
+    unsigned int writeSize = _oft[fp].writePtr + totalSize;
+    while (writeSize >= _fs->blockSize) { // Buffer overflow, flush to file to disk
+        unsigned long freeBlock = findFreeBlock();
+        markBlockBusy(freeBlock);
+        unsigned int bytesLeft = _fs->blockSize - _oft[fp].writePtr;
+        memcpy(_oft[fp].buffer + _oft[fp].writePtr, buffer, bytesLeft);
+        writeBlock(_oft[fp].buffer, freeBlock);
+        loadInode(_oft[fp].inodeBuffer,_oft[fp].inode);
+        _oft[fp].inodePtr += 1;
+        _oft[fp].inodeBuffer[_oft[fp].inodePtr] = freeBlock;
+        saveInode(_oft[fp].inodeBuffer, fp);
+        writeSize = writeSize - _fs->blockSize;
+        // Update file length
+        int curFileLen = getFileLength(_oft[fp].filename);
+        updateDirectoryFileLength(_oft[fp].filename, curFileLen + _fs->blockSize);
+    }
+    _oft[fp].writePtr = writeSize;
+}
+
+int calcNumBlocksRequired(unsigned int blockSize, unsigned dataSize, unsigned int dataCount) {
+    int totalSize = dataSize * dataCount;
+    return totalSize/blockSize;
 }
 
 // Flush the file data to the disk. Writes all data buffers, updates directory,
