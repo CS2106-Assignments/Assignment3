@@ -79,6 +79,7 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
     }
     int totalSize = dataSize * dataCount;
     unsigned int writeSize = _oft[fp].writePtr + totalSize;
+    // This handles appending
     while (writeSize >= _fs->blockSize) { // Buffer overflow, flush to file to disk
         unsigned long freeBlock = findFreeBlock();
         markBlockBusy(freeBlock);
@@ -86,15 +87,18 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
         memcpy(_oft[fp].buffer + _oft[fp].writePtr, buffer, bytesLeft);
         writeBlock(_oft[fp].buffer, freeBlock);
         loadInode(_oft[fp].inodeBuffer,_oft[fp].inode);
-        _oft[fp].inodePtr += 1;
         _oft[fp].inodeBuffer[_oft[fp].inodePtr] = freeBlock;
         saveInode(_oft[fp].inodeBuffer, fp);
         writeSize = writeSize - _fs->blockSize;
         // Update file length
         int curFileLen = getFileLength(_oft[fp].filename);
         updateDirectoryFileLength(_oft[fp].filename, curFileLen + _fs->blockSize);
+        _oft[fp].inodePtr += 1;
     }
+    // TODO need to handle MODE_READ_APPEND
     _oft[fp].writePtr = writeSize;
+    updateFreeList();
+    updateDirectory();
 }
 
 int calcNumBlocksRequired(unsigned int blockSize, unsigned dataSize, unsigned int dataCount) {
@@ -106,11 +110,18 @@ int calcNumBlocksRequired(unsigned int blockSize, unsigned dataSize, unsigned in
 // free list and inode for this file.
 void flushFile(int fp)
 {
-    loadInode(_oft->inodeBuffer, fp);
     unsigned long freeBlock = findFreeBlock();
     markBlockBusy(freeBlock);
-    writeBlock(_oft->buffer, freeBlock);
-
+    writeBlock(_oft[fp].buffer, freeBlock);
+    loadInode(_oft[fp].inodeBuffer, fp);
+    _oft[fp].inodePtr +=1;
+    _oft[fp].inodeBuffer[_oft[fp].inodePtr] = freeBlock;
+    saveInode(_oft[fp].inodeBuffer, fp);
+    // Update file length
+    int curFileLen = getFileLength(_oft[fp].filename);
+    updateDirectoryFileLength(_oft[fp].filename, curFileLen + _oft[fp].writePtr);
+    _oft[fp].writePtr = 0;
+    _oft[fp].readPtr = 0;
     updateFreeList();
     updateDirectory();
 }
@@ -118,7 +129,28 @@ void flushFile(int fp)
 // Read data from the file.
 void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
 {
+    TOpenFile openFile = _oft[fp];
+    // read ptr?
+    unsigned int totalReadSize = dataSize * dataCount;
+    unsigned int fileLen = getFileLength(openFile.filename);
+    unsigned int bytesLeftToRead = openFile.readPtr; 
 
+    unsigned int bytesRead = 0;
+    unsigned long blockNum;
+    unsigned int readItr = 0;
+    loadInode(openFile.inodeBuffer, openFile.inode);
+    while (bytesRead < totalReadSize) {
+        blockNum = openFile.inodeBuffer[readItr];
+        readBlock(openFile.buffer, blockNum);
+        memcpy(buffer + bytesRead, openFile.buffer, _fs->blockSize);
+        bytesRead += _fs->blockSize;
+        readItr += 1;
+    }
+
+    openFile.readPtr = totalReadSize - bytesRead; 
+
+    updateFreeList();
+    updateDirectory();
 }
 
 // Delete the file. Read-only flag (bit 2 of the attr field) in directory listing must not be set. 
