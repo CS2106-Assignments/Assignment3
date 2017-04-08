@@ -55,19 +55,21 @@ int openFile(const char *filename, unsigned char mode)
         if (_result == FS_FULL) { // ERROR when disk is full
             _oftMap[freeOftEntry] = 0;
             clearOftEntry(freeOftEntry);
-            return -1;
+            _oftCount -= 1;
+            return FS_FULL;
         }
         markBlockBusy(freeBlock);
         loadInode(_oft[freeOftEntry].inodeBuffer, fileIdx);
         _oft[freeOftEntry].inodeBuffer[0] = freeBlock;
-        writeBlock("",freeBlock);
+        writeBlock("", freeBlock);
         saveInode(_oft[freeOftEntry].inodeBuffer, fileIdx);
 
         updateFreeList();
         updateDirectory();
         return freeOftEntry;
     }
-    return -1;
+    _oftCount -= 1;
+    return FS_FILE_NOT_FOUND;
 }
 
 // Updates entire oft entry. 
@@ -84,6 +86,7 @@ void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsig
     _oft[oftIdx].filename = filename;
 }
 
+// Clears the oft entry
 unsigned int clearOftEntry(int oftIdx) {
     _oft[oftIdx].openMode = 0;
     _oft[oftIdx].blockSize = 0;
@@ -104,25 +107,70 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
         return;
     }
     int totalSize = dataSize * dataCount;
-    unsigned int writeSize = _oft[fp].writePtr + totalSize;
-    // This handles appending
-    while (writeSize >= _fs->blockSize) { // Buffer overflow, flush to file to disk
-        unsigned long freeBlock = findFreeBlock();
-        markBlockBusy(freeBlock);
-        unsigned int bytesLeft = _fs->blockSize - _oft[fp].writePtr;
-        memcpy(_oft[fp].buffer + _oft[fp].writePtr, buffer, bytesLeft);
-        writeBlock(_oft[fp].buffer, freeBlock);
-        loadInode(_oft[fp].inodeBuffer,_oft[fp].inode);
-        _oft[fp].inodeBuffer[_oft[fp].inodePtr] = freeBlock;
-        saveInode(_oft[fp].inodeBuffer, fp);
-        writeSize = writeSize - _fs->blockSize;
-        // Update file length
-        int curFileLen = getFileLength(_oft[fp].filename);
-        updateDirectoryFileLength(_oft[fp].filename, curFileLen + _fs->blockSize);
-        _oft[fp].inodePtr += 1;
+    TOpenFile openFile = _oft[fp];
+    loadInode(openFile.inodeBuffer, openFile.inode);
+
+    unsigned long freeBlock = -1;
+    unsigned int bytesLeftInBuffer = _fs->blockSize - openFile.writePtr;
+    unsigned int writeSize = 0;
+    unsigned int currentInodeToLookAt = 0;
+    unsigned int updatedLen = getFileLength(openFile.filename);
+    // If the buffer is still not full
+    if (totalSize < bytesLeftInBuffer) {
+        memcpy(openFile.buffer + openFile.writePtr, buffer, totalSize);
+        openFile.writePtr += totalSize;
+    } else { // Once buffer is full
+        // Fill up rest of the buffer
+        memcpy(openFile.buffer + openFile.writePtr, buffer, bytesLeftInBuffer);
+        if (openFile.openMode == MODE_READ_APPEND) {
+            freeBlock = findFreeBlock();
+            markBlockBusy(freeBlock);
+            writeBlock(openFile.buffer, freeBlock);
+        } else {
+            freeBlock = openFile.inodeBuffer[currentInodeToLookAt];
+            if (freeBlock == UNASSIGNED_BLOCK) {
+                freeBlock = findFreeBlock();
+                markBlockBusy(freeBlock);
+            }
+            writeBlock(openFile.buffer, freeBlock);
+            currentInodeToLookAt += 1;
+        }
+        openFile.writePtr = 0;
+        unsigned int currentFileLenLeft = totalSize - bytesLeftInBuffer;
+        // Continue to read blocks of file continuously
+        unsigned int numWriteItr = currentFileLenLeft / _fs->blockSize;
+        unsigned int i = 0;
+        unsigned int filePos = bytesLeftInBuffer;
+        while (i < numWriteItr) {
+            memcpy(openFile.buffer, buffer + filePos, _fs->blockSize);
+            if (openFile.openMode == MODE_READ_APPEND) {
+                freeBlock = findFreeBlock();
+                markBlockBusy(freeBlock);
+            } else {
+                freeBlock = openFile.inodeBuffer[currentInodeToLookAt];
+                if (freeBlock == UNASSIGNED_BLOCK) {
+                    freeBlock = findFreeBlock();
+                    markBlockBusy(freeBlock);
+                }
+                writeBlock(openFile.buffer, freeBlock);
+                currentInodeToLookAt += 1;
+            }
+            writeBlock(openFile.buffer, freeBlock);
+            filePos += _fs->blockSize;
+            i += 1;
+        }
+        openFile.writePtr = currentFileLenLeft - (i * _fs->blockSize);
+    
+        memcpy(openFile.buffer, buffer + filePos, openFile.writePtr);
+        if (openFile.openMode == MODE_READ_APPEND) {
+            updatedLen += filePos;
+        } else {
+            updatedLen = filePos;
+        }
     }
-    // TODO need to handle MODE_READ_APPEND
-    _oft[fp].writePtr = writeSize;
+    saveInode(openFile.inodeBuffer, fp);
+
+    updateDirectoryFileLength(openFile.filename, updatedLen);
     updateFreeList();
     updateDirectory();
 }
@@ -136,16 +184,18 @@ int calcNumBlocksRequired(unsigned int blockSize, unsigned dataSize, unsigned in
 // free list and inode for this file.
 void flushFile(int fp)
 {
+    TOpenFile *openFile = &_oft[fp];
     unsigned long freeBlock = findFreeBlock();
     markBlockBusy(freeBlock);
-    writeBlock(_oft[fp].buffer, freeBlock);
-    loadInode(_oft[fp].inodeBuffer, fp);
-    _oft[fp].inodePtr +=1;
-    _oft[fp].inodeBuffer[_oft[fp].inodePtr] = freeBlock;
-    saveInode(_oft[fp].inodeBuffer, fp);
+    writeBlock(openFile->buffer, freeBlock);
+    loadInode(openFile->inodeBuffer, fp);
+    openFile->inodePtr +=1;
+    unsigned int curFileLen = getFileLength(openFile->filename) + openFile->writePtr;
+    // Find the inode to put in
+    setBlockNumInInode(openFile->inodeBuffer, curFileLen, freeBlock);
+    saveInode(openFile->inodeBuffer, fp);
     // Update file length
-    int curFileLen = getFileLength(_oft[fp].filename);
-    updateDirectoryFileLength(_oft[fp].filename, curFileLen + _oft[fp].writePtr);
+    updateDirectoryFileLength(_oft[fp].filename, curFileLen);
     _oft[fp].writePtr = 0;
     _oft[fp].readPtr = 0;
 
@@ -156,29 +206,47 @@ void flushFile(int fp)
 // Read data from the file.
 void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
 {
-    TOpenFile openFile = _oft[fp];
-    // Find the total reading size needed
+    TOpenFile *openFile = &_oft[fp];
     unsigned int totalReadSize = dataSize * dataCount;
-    // Get the current size of the file
-    unsigned int fileLen = getFileLength(openFile.filename);
-    // The current read ptr of the file
-    unsigned int bytesLeftToRead = openFile.readPtr; 
-    unsigned int bytesRead = 0;
-    unsigned long blockNum;
-    unsigned int readItr = 0;
-    // Load inode
-    // TODO handle for when there is already a read poiter
-    loadInode(openFile.inodeBuffer, openFile.inode);
-    while (bytesRead < totalReadSize) {
-        blockNum = openFile.inodeBuffer[readItr];
-        readBlock(openFile.buffer, blockNum);
-        memcpy(buffer + bytesRead, openFile.buffer, _fs->blockSize);
-        bytesRead += _fs->blockSize;
-        readItr += 1;
+    unsigned int dirIdx = findFile(openFile->filename);
+    unsigned long blockNumber = -1;
+    loadInode(openFile->inodeBuffer, dirIdx);
+    char *readBuffer = (char *) malloc(_fs->blockSize);
+    unsigned int readFileLen = 0;
+    unsigned int filePos = 0;
+    if (openFile->readPtr < totalReadSize) {
+        blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, totalReadSize);
+        readBlock(readBuffer, blockNumber);
+        memcpy(openFile->buffer + openFile->readPtr, readBuffer, totalReadSize);
+    } else {
+        unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->readPtr;
+        blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, bytesLeftInBuffer);
+        readBlock(readBuffer, blockNumber);
+        memcpy(openFile->buffer + openFile->readPtr, readBuffer, bytesLeftInBuffer);
+        memcpy(buffer, openFile->buffer, _fs->blockSize);
+
+        // Number of read iterations
+        unsigned int curFileLen = totalReadSize - bytesLeftInBuffer;
+        unsigned int readItr = curFileLen / _fs->blockSize;
+        unsigned int i=0;
+        readFileLen = bytesLeftInBuffer;
+        filePos = bytesLeftInBuffer;
+        while (i < readItr) {
+            readFileLen += _fs->blockSize;
+            blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readFileLen);
+            readBlock(readBuffer, blockNumber);
+            memcpy(buffer + filePos, readBuffer, _fs->blockSize);
+        }
+        openFile->readPtr = totalReadSize - readFileLen;
+
+        if (openFile->readPtr) {
+            blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, totalReadSize);
+            readBlock(readBuffer, blockNumber);
+            memcpy(openFile->buffer, readBuffer, openFile->readPtr);
+        }
     }
 
-    openFile.readPtr = totalReadSize - bytesRead; 
-
+    free(readBuffer);
     updateFreeList();
     updateDirectory();
 }
@@ -187,7 +255,7 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
 // See TDirectory structure.
 void delFile(const char *filename) {
     // Check if the file has a bit 2 in attr field
-   unsigned int attr = getattr(filename);
+    unsigned int attr = getattr(filename);
 
     // Read-only flag is true (bit 2 of attr field is set to 1)
     if (CHECK_BIT(attr, 2)) {
