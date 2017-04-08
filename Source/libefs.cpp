@@ -13,7 +13,8 @@ bool *_oftMap;
 // Open file table counter
 int _oftCount=0;
 
-void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char* filename);
+void updateOftEntry(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char* filename);
+void clearOftEntry(unsigned int oftIdx);
 char *getFileMode(unsigned int openMode); 
 // Grabs the next free oft entry possible
 unsigned int getFreeOftEntry();
@@ -41,42 +42,58 @@ int openFile(const char *filename, unsigned char mode)
     }
     unsigned int fileIdx = findFile(filename);
     unsigned int freeOftEntry = getFreeOftEntry();
+    _oftMap[freeOftEntry] = 1;
     if (_result != FS_FILE_NOT_FOUND) { // If found
         // Update oft
-        updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
-        return _oftCount;
+        updateOftEntry(freeOftEntry, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
+        return freeOftEntry;
     }
     if (mode == MODE_CREATE) { // Create a file if mode is MODE_CREATE
         fileIdx = makeDirectoryEntry(filename, 0x0, 0);
-        updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
+        updateOftEntry(freeOftEntry, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
         unsigned long freeBlock = findFreeBlock();
         if (_result == FS_FULL) { // ERROR when disk is full
+            _oftMap[freeOftEntry] = 0;
+            clearOftEntry(freeOftEntry);
             return -1;
         }
         markBlockBusy(freeBlock);
-        loadInode(_oft[_oftCount].inodeBuffer, fileIdx);
-        _oft[_oftCount].inodeBuffer[0] = freeBlock;
+        loadInode(_oft[freeOftEntry].inodeBuffer, fileIdx);
+        _oft[freeOftEntry].inodeBuffer[0] = freeBlock;
         writeBlock("",freeBlock);
-        saveInode(_oft[_oftCount].inodeBuffer, fileIdx);
+        saveInode(_oft[freeOftEntry].inodeBuffer, fileIdx);
 
         updateFreeList();
         updateDirectory();
-        return _oftCount;
+        return freeOftEntry;
     }
     return -1;
 }
 
+// Updates entire oft entry. 
 void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char * filename) {
     // Update oft
-    _oft[_oftCount].openMode = openMode;
-    _oft[_oftCount].blockSize = blockSize;
-    _oft[_oftCount].inode = inode;
-    _oft[_oftCount].inodeBuffer = inodeBuffer;
-    _oft[_oftCount].buffer = buffer;
-    _oft[_oftCount].writePtr = writePtr;
-    _oft[_oftCount].readPtr = readPtr;
-    _oft[_oftCount].filePtr = filePtr;
-    _oft[_oftCount].filename = filename;
+    _oft[oftIdx].openMode = openMode;
+    _oft[oftIdx].blockSize = blockSize;
+    _oft[oftIdx].inode = inode;
+    _oft[oftIdx].inodeBuffer = inodeBuffer;
+    _oft[oftIdx].buffer = buffer;
+    _oft[oftIdx].writePtr = writePtr;
+    _oft[oftIdx].readPtr = readPtr;
+    _oft[oftIdx].filePtr = filePtr;
+    _oft[oftIdx].filename = filename;
+}
+
+unsigned int clearOftEntry(int oftIdx) {
+    _oft[oftIdx].openMode = 0;
+    _oft[oftIdx].blockSize = 0;
+    _oft[oftIdx].inode = 0;
+    free(_oft[oftIdx].inodeBuffer);
+    free(_oft[oftIdx].buffer);
+    _oft[oftIdx].writePtr = 0;
+    _oft[oftIdx].readPtr = 0;
+    _oft[oftIdx].filePtr = 0;
+    _oft[oftIdx].filename = NULL;
 }
 
 // Write data to the file. File must be opened in MODE_NORMAL or MODE_CREATE modes. Does nothing
@@ -178,7 +195,7 @@ void delFile(const char *filename) {
     }
     unsigned int dirIdx = findFile(filename);
     // Calc the total of inode that we will have
-    unsigned int fileLen = getFileLength(filname);
+    unsigned int fileLen = getFileLength(filename);
     unsigned int numFullBlocks = fileLen / _fs->blockSize;
     // Check if there is left over bytes that are in the blocks
     unsigned int isMoreBytes = fileLen - (numFullBlocks * _fs->blockSize);
@@ -195,7 +212,7 @@ void delFile(const char *filename) {
         markBlockFree(blockNum);
         inodeBuffer[i] = UNASSIGNED_BLOCK;
     }
-    delDirectorEntry(filename);
+    delDirectoryEntry(filename);
 
     updateFreeList();
     updateDirectory();
@@ -205,12 +222,14 @@ void delFile(const char *filename) {
 void closeFile(int fp) {
     // Flush modified buffers to disk
     TOpenFile openFile = _oft[fp];
+    _oftCount -= 1;
     flushFile(fp);
     // Release buffers
     free(openFile.buffer);
     free(openFile.inodeBuffer);
     // Update file discriptors
     // Free oft entry
+    _oftMap[fp] = 0;
 }
 
 // Unmount file system.
@@ -237,7 +256,7 @@ unsigned int getFreeOftEntry() {
     int i;
     for (i=0; i < MAX_OFT_ENTRY; i++) {
         if (_oftMap[i] == 0) {
-            break;;
+            break;
         }
     }
     return i;
