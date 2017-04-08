@@ -28,7 +28,6 @@ typedef struct oft
 
 void updateOftEntry(unsigned int oftIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char* filename);
 void clearOftEntry(unsigned int oftIdx); 
-char *getFileMode(unsigned int openMode);  
 // Grabs the next free oft entry possible 
 unsigned int getFreeOftEntry();
 // Mounts a paritition given in fsPartitionName. Must be called before all

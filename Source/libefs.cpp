@@ -310,19 +310,6 @@ void closeFS() {
     free(_oftMap);
     free(_oft);
 }
-
-char *getFileMode(unsigned int openMode) {
-    char *mode;
-    if (openMode == MODE_READ_ONLY) {
-        mode = "r";
-    } else if (openMode == MODE_READ_APPEND) {
-        mode = "ab+";
-    } else {
-        mode = "w";
-    }
-    return mode;
-}
-
 unsigned int getFreeOftEntry() {
     int i;
     for (i=0; i < MAX_OFT_ENTRY; i++) {
