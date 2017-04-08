@@ -7,8 +7,6 @@ int main(int ac, char **av)
         printf("\nUsage: %s <file to check in> <password>\n\n", av[0]);
         return -1;
     }
-
-<<<<<<< HEAD
 	// Load the file system
 	initFS("part.dsk", av[2]);
 
@@ -23,7 +21,7 @@ int main(int ac, char **av)
 
 	fp = openFile(av[1], MODE_CREATE);
 
-	File *file = fopen(av[1], "r");
+	FILE *file = fopen(av[1], "r");
 
 	// obtain file size:
 	fseek(file, 0, SEEK_END);
