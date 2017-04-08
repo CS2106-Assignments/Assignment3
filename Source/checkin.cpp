@@ -2,12 +2,13 @@
 
 int main(int ac, char **av)
 {
-	if(ac != 3)
-	{
-		printf("\nUsage: %s <file to check in> <password>\n\n", av[0]);
-		return -1;
-	}
+    if(ac != 3)
+    {
+        printf("\nUsage: %s <file to check in> <password>\n\n", av[0]);
+        return -1;
+    }
 
+<<<<<<< HEAD
 	// Load the file system
 	initFS("part.dsk", av[2]);
 
@@ -48,5 +49,4 @@ int main(int ac, char **av)
 	fclose(file);
 	closeFile(fp);
 	return 0;
-
 }

@@ -7,7 +7,6 @@ int main(int ac, char **av)
 		printf("\nUsage: %s <file to check out> <password>\n\n", av[0]);
 		return -1;
 	}
-
 	// Mount the file system
 	initFS("part.dsk", av[2]);
 
@@ -42,5 +41,5 @@ int main(int ac, char **av)
 	closeFile(fp);
 
 	free(buffer);
-	return 0;
+    return 0;
 }
