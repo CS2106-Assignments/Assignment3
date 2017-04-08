@@ -19,79 +19,79 @@ int main(int ac, char **av)
         }
 */
 
-	FILE *fp = openFile(av[1], "r");
+	int fp = openFile(av[1], "r");
 
-	if (fp == null){
+	if (fp == -1){
 		printf("\nUnable to opensource file %s\n\n", av[1]);
 		exit(-1);
 	}
 
-        // Load the file system
-        //mountFS("part.dsk", av[2]);
+	// Load the file system
+	//mountFS("part.dsk", av[2]);
 	initFS("part.dsk", av[2]);
 
-        // Get the FS metadata
-        //TFileSystemStruct *fs = getFSInfo();
+	// Get the FS metadata
+	//TFileSystemStruct *fs = getFSInfo();
 	TFileSystemStruct *fs = getFSInfo();
 
-        //char *buffer;
+	//char *buffer;
 	char *buffer;
 
-        // Allocate the buffer for reading
-        //buffer = makeDataBuffer();
+	// Allocate the buffer for reading
+	//buffer = makeDataBuffer();
 	buffer = makeDataBuffer();
 
-        // Read the file
-        //unsigned long len = fread(buffer, sizeof(char), fs->blockSize, fp);
-	int len = readFile(buffer, sizeof(char), fs->blockSize, fp);
+	// Read the file
+	//unsigned long len = fread(buffer, sizeof(char), fs->blockSize, fp);
+	int len = readFile(fp, buffer, sizeof(char), fs->blockSize);
 
-        // Write the directory entry
-        //unsigned int dirNdx = makeDirectoryEntry(av[1], 0x0, len);
+	// Write the directory entry
+	//unsigned int dirNdx = makeDirectoryEntry(av[1], 0x0, len);
 	unsigned int dirNdx = makeDirectoryEntry(av[1], 0x0, len);
 
-        // Find a free block
-        //unsigned long freeBlock = findFreeBlock();
+	// Find a free block
+	//unsigned long freeBlock = findFreeBlock();
 	unsigned long freeBlock = findFreeBlock();
 
-        // Mark the free block now as busy
-        //markBlockBusy(freeBlock);
+	// Mark the free block now as busy
+	//markBlockBusy(freeBlock);
 	markBlockBusy(freeBlock);
 
-        // Create the inode buffer
-        //unsigned long *inode = makeInodeBuffer();
+	// Create the inode buffer
+	//unsigned long *inode = makeInodeBuffer();
 	unsigned long *inode = makeInodeBuffer();
 
-        // Load the
-        //loadInode(inode, dirNdx);
+	// Load the Inode
+	//loadInode(inode, dirNdx);
 	loadInode(inode, dirNdx);
 
-        // Set the first entry of the inode to the free block
-        //inode[0]=freeBlock;
+	// Set the first entry of the inode to the free block
+	//inode[0]=freeBlock;
 	inode[0]=freeBlock;
 
-        // Write the data to the block
-        //writeBlock(buffer, freeBlock);
+	// Write the data to the block
+	//writeBlock(buffer, freeBlock);
 	writeBlock(buffer, freeBlock);
 
-        // Write the inode
+	// Write the inode
 	//saveInode(inode, dirNdx);
 	saveInode(inode, dirNdx);
 
-        // Write the free list
-        //updateFreeList();
+	// Write the free list
+	//updateFreeList();
 	updateFreeList();
 
-        // Write the diretory
-        //updateDirectory();
+	// Write the diretory
+	//updateDirectory();
 	updateDirectory();
 
-        // Unmount
-        //unmountFS();
-	unmountFS();
+	// Unmount
+	//unmountFS();
+	closeFS();
 
-        // Free data and inode buffer
-        free(buffer);
-        free(inode);
-        return 0;
+	// Free data and inode buffer
+	free(buffer);
+	free(inode);
+	return 0;
 
 }
