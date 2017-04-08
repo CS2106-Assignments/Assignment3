@@ -12,16 +12,17 @@ int main(int ac, char **av)
 
 	int fp = openFile(av[1], MODE_READ_ONLY);
 
-	if (fp != -1){
+	if (fp != FS_FILE_NOT_FOUND){
 		printf("\nDUPLICATE FILE %s\n\n", av[1]);
 		exit(FS_DUPLICATE_FILE);
 	}
 
-	closeFile(fp);
 
 	fp = openFile(av[1], MODE_CREATE);
 
-	FILE *file = fopen(av[1], "r");
+    printf("OFT Entry %d\n", fp);
+	
+    FILE *file = fopen(av[1], "r");
 
 	// obtain file size:
 	fseek(file, 0, SEEK_END);
@@ -34,9 +35,10 @@ int main(int ac, char **av)
 	// Read the file
 	fread(buffer, sizeof(char), lSize, file);
 
+    printf("%s\n", buffer);
 	// Write to file
 	writeFile(fp, buffer, sizeof(char), lSize);
-
+    closeFile(fp);
 	// Unmount
 	closeFS();
 
@@ -45,6 +47,5 @@ int main(int ac, char **av)
 
 	// Close file
 	fclose(file);
-	closeFile(fp);
-	return 0;
+    return 0;
 }

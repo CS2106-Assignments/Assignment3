@@ -13,7 +13,6 @@ int main(int ac, char **av)
 	// Search the directory for the file
 	//unsigned int fileNdx = findFile(av[1]);
 	int fileNdx = openFile(av[1], MODE_READ_ONLY);
-
 	if (fileNdx == -1)
 	{
 		printf("Cannot find encrypted file %s\n", av[1]);
@@ -22,11 +21,14 @@ int main(int ac, char **av)
 
 	// Get file length
     int len = getFileLength(av[1]);
-	// Allocate the inode and buffer
+    // Allocate the inode and buffer
 	char *buffer = (char*)malloc(sizeof(char)*len);
 
 	// Write the data
 	readFile(fileNdx, buffer, sizeof(char), len);
+
+    printf("BUFFER: %s\n", buffer);
+    
 	// Close the file
 	closeFile(fileNdx);
 
@@ -37,5 +39,6 @@ int main(int ac, char **av)
 	// Unmount the file system
 	closeFS();
 	fclose(fp);
+    
     return 0;
 }
