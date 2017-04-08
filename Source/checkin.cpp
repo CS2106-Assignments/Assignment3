@@ -8,41 +8,45 @@ int main(int ac, char **av)
 		return -1;
 	}
 
-	int fp = openFile(av[1], "r");
-
-	if (fp == -1){
-		printf("\nUnable to opensource file %s\n\n", av[1]);
-		exit(-1);
-	}
-
 	// Load the file system
 	initFS("part.dsk", av[2]);
 
-	FILE *pFile = fopen(av[1], "r");
+	int fp = openFile(av[1], MODE_READ_ONLY);
+
+	if (fp != -1){
+		printf("\nDUPLICATE FILE %s\n\n", av[1]);
+		exit(FS_DUPLICATE_FILE);
+	}
+
+	closeFile(fp);
+
+	fp = openFile(av[1], MODE_CREATE);
+
+	File *file = fopen(av[1], "r");
 
 	// obtain file size:
-	fseek(pFile, 0, SEEK_END);
-	long lSize = ftell(pFile);
-	rewind(pFile);
-
-	char *buffer;
+	fseek(file, 0, SEEK_END);
+	long lSize = ftell(file);
+	rewind(file);
 
 	// allocate memory to contain the whole file:
-	buffer = (char*)malloc(sizeof(char)*lSize);
+	char *buffer = (char*)malloc(sizeof(char)*lSize);
 
 	// Read the file
-	int len = readFile(fp, buffer, sizeof(char), lSize);
+	fread(buffer, sizeof(char), lSize, file);
 
 	// Write to file
-	writeFile(fp, buffer, sizeof(char), len);
+	writeFile(fp, buffer, sizeof(char), lSize);
 
 	// Unmount
-	//unmountFS();
 	closeFS();
 
 	// Free buffer
 	free(buffer);
-	//free(inode);
+
+	// Close file
+	fclose(file);
+	closeFile(fp);
 	return 0;
 
 }

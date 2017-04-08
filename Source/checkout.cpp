@@ -13,7 +13,7 @@ int main(int ac, char **av)
 
 	// Search the directory for the file
 	//unsigned int fileNdx = findFile(av[1]);
-	int fileNdx = openFile(av[1], "r");
+	int fileNdx = openFile(av[1], MODE_READ_ONLY);
 
 	if (fileNdx == -1)
 	{
@@ -21,24 +21,25 @@ int main(int ac, char **av)
 		exit(-1);
 	}
 
-	// Get file length
+	FILE *file = fopen(av[1], "r");
 
-	// obtain file size:
-	fseek(pFile, 0, SEEK_END);
-	int len = ftell(pFile);
-	rewind(pFile);
+	// Get file length
+	fseek(file, 0, SEEK_END);
+	int len = ftell(file);
+	rewind(file);
 
 	// Allocate the inode and buffer
-	char *buffer = (char*)malloc(sizeof(char)*lSize);
+	char *buffer = (char*)malloc(sizeof(char)*len);
 
 	// Unmount the file system
 	closeFS();
 
 	// Write the data
-	writeFile (fp, buffer, sizeof(char), len);
+	readFile(fp, buffer, sizeof(char), len);
 
 	// Close the file
-	fclose(fp);
+	fclose(file);
+	closeFile(fp);
 
 	free(buffer);
 	return 0;
