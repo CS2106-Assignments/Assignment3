@@ -8,8 +8,6 @@ int main(int ac, char **av)
 		return -1;
 	}
 
-	return 0;
-
 	int fp = openFile(av[1], "r");
 
 	if (fp == -1){
@@ -31,16 +29,6 @@ int main(int ac, char **av)
 
 	// allocate memory to contain the whole file:
 	buffer = (char*)malloc(sizeof(char)*lSize);
-
-	// copy the file into the buffer:
-	fread(buffer, 1, lSize, pFile);
-
-	/* the whole file is now loaded in the memory buffer. */
-	
-	buffer = (char*)malloc(sizeof(char)*lSize);
-
-	// copy the file into the buffer:
-	//fread(buffer, sizeof(char), lSize, pFile);
 
 	// Read the file
 	int len = readFile(fp, buffer, sizeof(char), lSize);
