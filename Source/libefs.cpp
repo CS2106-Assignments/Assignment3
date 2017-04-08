@@ -13,12 +13,6 @@ bool *_oftMap;
 // Open file table counter
 int _oftCount=0;
 
-void updateOftEntry(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char* filename);
-void clearOftEntry(unsigned int oftIdx);
-char *getFileMode(unsigned int openMode); 
-// Grabs the next free oft entry possible
-unsigned int getFreeOftEntry();
-
 // Mounts a paritition given in fsPartitionName. Must be called before all
 // other functions
 void initFS(const char *fsPartitionName, const char *fsPassword)
@@ -45,12 +39,12 @@ int openFile(const char *filename, unsigned char mode)
     _oftMap[freeOftEntry] = 1;
     if (_result != FS_FILE_NOT_FOUND) { // If found
         // Update oft
-        updateOftEntry(freeOftEntry, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
+        updateOftEntry(freeOftEntry, mode, 0, 0, 0, filename);
         return freeOftEntry;
     }
     if (mode == MODE_CREATE) { // Create a file if mode is MODE_CREATE
         fileIdx = makeDirectoryEntry(filename, 0x0, 0);
-        updateOftEntry(freeOftEntry, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
+        updateOftEntry(freeOftEntry, mode, 0, 0, 0, filename);
         unsigned long freeBlock = findFreeBlock();
         if (_result == FS_FULL) { // ERROR when disk is full
             _oftMap[freeOftEntry] = 0;
@@ -73,13 +67,12 @@ int openFile(const char *filename, unsigned char mode)
 }
 
 // Updates entire oft entry. 
-void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char * filename) {
+void updateOftEntry(unsigned int oftIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename) {
     // Update oft
     _oft[oftIdx].openMode = openMode;
-    _oft[oftIdx].blockSize = blockSize;
-    _oft[oftIdx].inode = inode;
-    _oft[oftIdx].inodeBuffer = inodeBuffer;
-    _oft[oftIdx].buffer = buffer;
+    _oft[oftIdx].blockSize = _fs->blockSize;
+    _oft[oftIdx].inodeBuffer = makeInodeBuffer();
+    _oft[oftIdx].buffer = makeDataBuffer();
     _oft[oftIdx].writePtr = writePtr;
     _oft[oftIdx].readPtr = readPtr;
     _oft[oftIdx].filePtr = filePtr;
@@ -87,7 +80,7 @@ void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsig
 }
 
 // Clears the oft entry
-unsigned int clearOftEntry(int oftIdx) {
+void clearOftEntry(unsigned int oftIdx) {
     _oft[oftIdx].openMode = 0;
     _oft[oftIdx].blockSize = 0;
     _oft[oftIdx].inode = 0;

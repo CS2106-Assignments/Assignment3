@@ -20,26 +20,22 @@ int main(int ac, char **av)
 		exit(-1);
 	}
 
-	FILE *file = fopen(av[1], "r");
-
 	// Get file length
-	fseek(file, 0, SEEK_END);
-	int len = ftell(file);
-	rewind(file);
-
+    int len = getFileLength(av[1]);
 	// Allocate the inode and buffer
 	char *buffer = (char*)malloc(sizeof(char)*len);
 
+	// Write the data
+	readFile(fileNdx, buffer, sizeof(char), len);
+	// Close the file
+	closeFile(fileNdx);
+
+    FILE *fp = fopen(av[1], "w");
+
+    fwrite(buffer,sizeof(char), len, fp);
+	free(buffer);
 	// Unmount the file system
 	closeFS();
-
-	// Write the data
-	readFile(fp, buffer, sizeof(char), len);
-
-	// Close the file
-	fclose(file);
-	closeFile(fp);
-
-	free(buffer);
+	fclose(fp);
     return 0;
 }
