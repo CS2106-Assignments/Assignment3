@@ -1,19 +1,22 @@
 #include "libefs.h"
 #define UNASSIGNED_BLOCK 0
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
-#define ROOT_DIR "/"
+#define MAX_OFT_ENTRY 1024
 
 // FS Descriptor
 TFileSystemStruct *_fs;
 
 // Open File Table
 TOpenFile *_oft;
+bool *_oftMap;
 
 // Open file table counter
 int _oftCount=0;
 
 void updateOft(int oftIdx, unsigned char openMode, unsigned int blockSize, unsigned long inode,unsigned long *inodeBuffer, char *buffer, unsigned int writePtr, unsigned int readPtr, unsigned filePtr, const char* filename);
 char *getFileMode(unsigned int openMode); 
+// Grabs the next free oft entry possible
+unsigned int getFreeOftEntry();
 
 // Mounts a paritition given in fsPartitionName. Must be called before all
 // other functions
@@ -21,7 +24,8 @@ void initFS(const char *fsPartitionName, const char *fsPassword)
 {
     mountFS(fsPartitionName, fsPassword);
     _fs = getFSInfo();
-    _oft = (TOpenFile *) malloc(sizeof(TOpenFile*) * _fs-> maxFiles);
+    _oft = (TOpenFile *) malloc(sizeof(TOpenFile*) * MAX_OFT_ENTRY);
+    _oftMap = (bool *) malloc(sizeof(bool *) * MAX_OFT_ENTRY);
 }
 
 // Opens a file in the partition. Depending on mode, a new file may be created
@@ -31,7 +35,12 @@ void initFS(const char *fsPartitionName, const char *fsPassword)
 int openFile(const char *filename, unsigned char mode)
 {
     _oftCount += 1;
-    int fileIdx = findFile(filename);
+    if (_oftCount >= MAX_OFT_ENTRY) {
+        _oftCount = MAX_OFT_ENTRY-1;
+        return -1;
+    }
+    unsigned int fileIdx = findFile(filename);
+    unsigned int freeOftEntry = getFreeOftEntry();
     if (_result != FS_FILE_NOT_FOUND) { // If found
         // Update oft
         updateOft(_oftCount, mode, _fs->blockSize, fileIdx, makeInodeBuffer(), makeDataBuffer(), 0, 0, 0, filename);
@@ -122,6 +131,7 @@ void flushFile(int fp)
     updateDirectoryFileLength(_oft[fp].filename, curFileLen + _oft[fp].writePtr);
     _oft[fp].writePtr = 0;
     _oft[fp].readPtr = 0;
+
     updateFreeList();
     updateDirectory();
 }
@@ -130,14 +140,17 @@ void flushFile(int fp)
 void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
 {
     TOpenFile openFile = _oft[fp];
-    // read ptr?
+    // Find the total reading size needed
     unsigned int totalReadSize = dataSize * dataCount;
+    // Get the current size of the file
     unsigned int fileLen = getFileLength(openFile.filename);
+    // The current read ptr of the file
     unsigned int bytesLeftToRead = openFile.readPtr; 
-
     unsigned int bytesRead = 0;
     unsigned long blockNum;
     unsigned int readItr = 0;
+    // Load inode
+    // TODO handle for when there is already a read poiter
     loadInode(openFile.inodeBuffer, openFile.inode);
     while (bytesRead < totalReadSize) {
         blockNum = openFile.inodeBuffer[readItr];
@@ -156,35 +169,56 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
 // Delete the file. Read-only flag (bit 2 of the attr field) in directory listing must not be set. 
 // See TDirectory structure.
 void delFile(const char *filename) {
-    unsigned int inodeId = findFile(filename);
-    if (inodeId == FS_FILE_NOT_FOUND) {
-        return;
-    }
+    // Check if the file has a bit 2 in attr field
+   unsigned int attr = getattr(filename);
 
-    _oft->inode = inodeId;
-    loadInode(_oft->inodeBuffer, inodeId);
-    unsigned int attr = getattr(filename);
-    if (CHECK_BIT(attr,2)) {  
+    // Read-only flag is true (bit 2 of attr field is set to 1)
+    if (CHECK_BIT(attr, 2)) {
         return;
     }
-    int i = 0;
-    while (_oft->inodeBuffer[i] != UNASSIGNED_BLOCK) {
-        markBlockFree(_oft->inodeBuffer[i]);
+    unsigned int dirIdx = findFile(filename);
+    // Calc the total of inode that we will have
+    unsigned int fileLen = getFileLength(filname);
+    unsigned int numFullBlocks = fileLen / _fs->blockSize;
+    // Check if there is left over bytes that are in the blocks
+    unsigned int isMoreBytes = fileLen - (numFullBlocks * _fs->blockSize);
+    unsigned int totalInodeCount = numFullBlocks;
+    if (isMoreBytes) {
+        totalInodeCount += 1;
     }
-    delDirectoryEntry(filename);
+    unsigned long *inodeBuffer = makeInodeBuffer();
+    loadInode(inodeBuffer, dirIdx);
+
+    int i;
+    for (int i = 0; i < totalInodeCount; i++) {
+        unsigned long blockNum = inodeBuffer[i];
+        markBlockFree(blockNum);
+        inodeBuffer[i] = UNASSIGNED_BLOCK;
+    }
+    delDirectorEntry(filename);
+
     updateFreeList();
     updateDirectory();
 }
 
 // Close a file. Flushes all data buffers, updates inode, directory, etc.
 void closeFile(int fp) {
+    // Flush modified buffers to disk
+    TOpenFile openFile = _oft[fp];
+    flushFile(fp);
+    // Release buffers
+    free(openFile.buffer);
+    free(openFile.inodeBuffer);
+    // Update file discriptors
+    // Free oft entry
 }
 
 // Unmount file system.
 void closeFS() {
     unmountFS();
-    free(_oft->buffer);
-    free(_oft->inodeBuffer);
+    // Go into every oft entry and free (close) everything if possible
+    free(_oftMap);
+    free(_oft);
 }
 
 char *getFileMode(unsigned int openMode) {
@@ -197,4 +231,14 @@ char *getFileMode(unsigned int openMode) {
         mode = "w";
     }
     return mode;
+}
+
+unsigned int getFreeOftEntry() {
+    int i;
+    for (i=0; i < MAX_OFT_ENTRY; i++) {
+        if (_oftMap[i] == 0) {
+            break;;
+        }
+    }
+    return i;
 }
