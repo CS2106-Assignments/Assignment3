@@ -13,7 +13,7 @@ int main(int ac, char **av)
 	// Search the directory for the file
 	//unsigned int fileNdx = findFile(av[1]);
 	int fileNdx = openFile(av[1], MODE_READ_ONLY);
-	if (fileNdx == -1)
+	if (fileNdx == FS_FILE_NOT_FOUND)
 	{
 		printf("Cannot find encrypted file %s\n", av[1]);
 		exit(-1);
