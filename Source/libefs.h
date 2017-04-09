@@ -18,7 +18,7 @@ typedef struct oft
   unsigned char openMode; // Mode selected
   unsigned int blockSize; // Size of each block
   unsigned long inode; // Inode pointer
-  unsigned int inodePtr;
+  unsigned int fdIdx; // File discriptor id
   unsigned long *inodeBuffer; // Inode buffer
   char *buffer; // Data buffer
   unsigned int writePtr; // Buffer index for writing data

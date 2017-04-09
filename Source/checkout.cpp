@@ -27,7 +27,7 @@ int main(int ac, char **av)
 	// Write the data
 	readFile(fileNdx, buffer, sizeof(char), len);
 
-    printf("BUFFER: %s\n", buffer);
+    printf("\nBUFFER: %s\n", buffer);
     
 	// Close the file
 	closeFile(fileNdx);
