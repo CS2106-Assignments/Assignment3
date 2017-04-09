@@ -12,16 +12,13 @@ int main(int ac, char **av)
 
 	int fp = openFile(av[1], MODE_READ_ONLY);
 
-	if (fp != FS_FILE_NOT_FOUND){
+	if (fp != FS_FILE_NOT_FOUND) {
 		printf("\nDUPLICATE FILE %s\n\n", av[1]);
 		exit(FS_DUPLICATE_FILE);
 	}
 
-
 	fp = openFile(av[1], MODE_CREATE);
 
-    printf("OFT Entry %d\n", fp);
-	
     FILE *file = fopen(av[1], "r");
 
 	// obtain file size:
@@ -36,6 +33,7 @@ int main(int ac, char **av)
 	fread(buffer, sizeof(char), lSize, file);
 
     printf("%s\n", buffer);
+
 	// Write to file
 	writeFile(fp, buffer, sizeof(char), lSize);
     closeFile(fp);

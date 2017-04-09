@@ -32,7 +32,7 @@ int openFile(const char *filename, unsigned char mode)
     _oftCount += 1;
     if (_oftCount >= MAX_OFT_ENTRY) {
         _oftCount = MAX_OFT_ENTRY-1;
-        return -1;
+        return OPEN_FILE_TABLE_FULL;
     }
     unsigned int fileIdx = findFile(filename);
     unsigned int freeOftEntry = getFreeOftEntry();
@@ -55,9 +55,7 @@ int openFile(const char *filename, unsigned char mode)
         markBlockBusy(freeBlock);
         loadInode(_oft[freeOftEntry].inodeBuffer, fileIdx);
         _oft[freeOftEntry].inodeBuffer[0] = freeBlock;
-        printf("1\n");
         writeBlock(_oft[freeOftEntry].buffer, freeBlock);
-        printf("2\n");
         saveInode(_oft[freeOftEntry].inodeBuffer, fileIdx);
 
         updateFreeList();
@@ -102,9 +100,7 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
         return;
     }
     int totalSize = dataSize * dataCount;
-    printf("%d\n", totalSize);
     TOpenFile *openFile = &_oft[fp];
-    printf("Filename: %s\n", openFile->filename);
     unsigned int fileIdx = findFile(openFile->filename);
     loadInode(openFile->inodeBuffer, fileIdx);
 
@@ -185,7 +181,6 @@ void flushFile(int fp)
     TOpenFile *openFile = &_oft[fp];
     unsigned long freeBlock = findFreeBlock();
     unsigned int fileIdx = findFile(openFile->filename);
-    printf("Free block id: %d", freeBlock);
     markBlockBusy(freeBlock);
     writeBlock(openFile->buffer, freeBlock);
     loadInode(openFile->inodeBuffer, fileIdx);
@@ -216,9 +211,7 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
     unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->readPtr;
     if (totalReadSize < bytesLeftInBuffer) {
         blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, totalReadSize);
-        printf("Free block Number to read: %d\n", blockNumber);
         readBlock(readBuffer, blockNumber);
-        printf("READ BUFFER: %s\n", readBuffer);
         memcpy(openFile->buffer + openFile->readPtr, readBuffer, totalReadSize);
         openFile->readPtr += totalReadSize;
         memcpy(buffer, openFile->buffer, openFile->readPtr);
@@ -301,6 +294,7 @@ void closeFile(int fp) {
     // Update file discriptors
     // Free oft entry
     _oftMap[fp] = 0;
+    clearOftEntry(fp);
 }
 
 // Unmount file system.

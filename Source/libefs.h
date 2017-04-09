@@ -1,4 +1,5 @@
 #include "efs.h"
+#define OPEN_FILE_TABLE_FULL 99999998
 
 /* FILE MODES for opening a file */
 enum
