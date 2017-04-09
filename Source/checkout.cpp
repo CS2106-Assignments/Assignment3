@@ -20,13 +20,13 @@ int main(int ac, char **av)
 	}
 
 	// Get file length
-    int len = getFileLength(av[1]);
+    int len = getFileLength(av[1]) + 1;
     // Allocate the inode and buffer
 	char *buffer = (char*)malloc(sizeof(char)*len);
 
 	// Write the data
-	readFile(fileNdx, buffer, sizeof(char), len);
-
+	readFile(fileNdx, buffer, sizeof(char), len - 1);
+    buffer[len-1] = '\0';
     printf("\nBUFFER: %s\n", buffer);
     
 	// Close the file

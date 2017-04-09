@@ -26,11 +26,13 @@ int main(int ac, char **av)
 	long lSize = ftell(file);
 	rewind(file);
 
+    int len = lSize + 1;
 	// allocate memory to contain the whole file:
-	char *buffer = (char*)malloc(sizeof(char)*lSize);
+	char *buffer = (char*)malloc(sizeof(char)*(len));
 
 	// Read the file
 	fread(buffer, sizeof(char), lSize, file);
+    buffer[len-1] = '\0';
 
     printf("%s\n", buffer);
 

@@ -63,8 +63,6 @@ int openFile(const char *filename, unsigned char mode)
     return FS_FILE_NOT_FOUND;
 }
 
-
-
 // Write data to the file. File must be opened in MODE_NORMAL or MODE_CREATE modes. Does nothing
 // if file is opened in MODE_READ_ONLY mode.
 void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
