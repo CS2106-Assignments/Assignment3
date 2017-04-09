@@ -13,6 +13,16 @@ bool *_oftMap;
 // Open file table counter
 int _oftCount=0;
 
+
+int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode); 
+int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode);
+void updateOftEntry(unsigned int oftIdx,unsigned int fdIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename);
+void clearOftEntry(unsigned int oftIdx); 
+unsigned int getFreeOftEntry();
+void writeFileIntoWriteBuffer(TOpenFile *openFile,void *buffer, unsigned int writeSize);
+void fillUpRestOfWriteBuffer(TOpenFile *openFile, void *buffer, unsigned int writeSize);
+void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int writeSize);
+
 // Mounts a paritition given in fsPartitionName. Must be called before all
 // other functions
 void initFS(const char *fsPartitionName, const char *fsPassword)
@@ -39,63 +49,21 @@ int openFile(const char *filename, unsigned char mode)
     _oftMap[freeOftEntry] = 1;
 
     if (_result != FS_FILE_NOT_FOUND) { // If found
-        // Update oft
-        updateOftEntry(freeOftEntry, mode, 0, 0, 0, filename);
-        _oft[freeOftEntry].fdIdx = fileIdx;
-        return freeOftEntry;
+        return openFileIsFound(freeOftEntry, fileIdx, filename, mode);
     }
 
     if (mode == MODE_CREATE) { // Create a file if mode is MODE_CREATE
-        fileIdx = makeDirectoryEntry(filename, 0x0, 0);
-        updateOftEntry(freeOftEntry, mode, 0, 0, 0, filename);
-        _oft[freeOftEntry].fdIdx = fileIdx;
-        unsigned long freeBlock = findFreeBlock();
-        if (_result == FS_FULL) { // ERROR when disk is full
-            _oftMap[freeOftEntry] = 0;
-            clearOftEntry(freeOftEntry);
-            _oftCount -= 1;
-            return FS_FULL;
-        }
-        updateFreeList();
-        updateDirectory();
-        return freeOftEntry;
+        return openFileCreateNewFile(freeOftEntry, filename, mode);
     }
     _oftCount -= 1;
     return FS_FILE_NOT_FOUND;
-}
-
-// Updates entire oft entry. 
-void updateOftEntry(unsigned int oftIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename) {
-    // Update oft
-    _oft[oftIdx].openMode = openMode;
-    _oft[oftIdx].blockSize = _fs->blockSize;
-    _oft[oftIdx].inodeBuffer = makeInodeBuffer();
-    _oft[oftIdx].buffer = makeDataBuffer();
-    _oft[oftIdx].writePtr = writePtr;
-    _oft[oftIdx].readPtr = readPtr;
-    _oft[oftIdx].filePtr = filePtr;
-    _oft[oftIdx].filename = filename;
-}
-
-// Clears the oft entry
-void clearOftEntry(unsigned int oftIdx) {
-    _oft[oftIdx].openMode = 0;
-    _oft[oftIdx].blockSize = 0;
-    _oft[oftIdx].inode = 0;
-    _oft[oftIdx].fdIdx = 0;
-    free(_oft[oftIdx].inodeBuffer);
-    free(_oft[oftIdx].buffer);
-    _oft[oftIdx].writePtr = 0;
-    _oft[oftIdx].readPtr = 0;
-    _oft[oftIdx].filePtr = 0;
-    _oft[oftIdx].filename = NULL;
 }
 
 // Write data to the file. File must be opened in MODE_NORMAL or MODE_CREATE modes. Does nothing
 // if file is opened in MODE_READ_ONLY mode.
 void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
 {
-    if (_oft[fp].openMode == MODE_READ_ONLY) {
+    if (_oft[fp].openMode == MODE_READ_ONLY || _oftMap[fp] == 0) {
         return;
     }
     int totalSize = dataSize * dataCount;
@@ -106,65 +74,25 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
     unsigned long freeBlock = -1;
     unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->writePtr;
     unsigned int writeSize = 0;
-    unsigned int currentInodeToLookAt = 0;
-    unsigned int updatedLen = getFileLength(openFile->filename);
-    printf("writeFile updatedLen: %d\ndataCount: %d\n", updatedLen, dataCount);
     // If the buffer is still not full
     if (totalSize < bytesLeftInBuffer) {
-        memcpy(openFile->buffer + openFile->writePtr, buffer, totalSize);
-        openFile->writePtr += totalSize;
-    } else { // Once buffer is full
-        // Fill up rest of the buffer
-        memcpy(openFile->buffer + openFile->writePtr, buffer, bytesLeftInBuffer);
-        if (openFile->openMode == MODE_READ_APPEND) {
-            freeBlock = findFreeBlock();
-            markBlockBusy(freeBlock);
-            writeBlock(openFile->buffer, freeBlock);
-        } else {
-            freeBlock = openFile->inodeBuffer[currentInodeToLookAt];
-            if (freeBlock == UNASSIGNED_BLOCK) {
-                freeBlock = findFreeBlock();
-                markBlockBusy(freeBlock);
-            }
-            writeBlock(openFile->buffer, freeBlock);
-            currentInodeToLookAt += 1;
-        }
-        openFile->writePtr = 0;
-        unsigned int currentFileLenLeft = totalSize - bytesLeftInBuffer;
-        // Continue to read blocks of file continuously
-        unsigned int numWriteItr = currentFileLenLeft / _fs->blockSize;
-        unsigned int i = 0;
-        unsigned int filePos = bytesLeftInBuffer;
-        while (i < numWriteItr) {
-            memcpy(openFile->buffer, buffer + filePos, _fs->blockSize);
-            if (openFile->openMode == MODE_READ_APPEND) {
-                freeBlock = findFreeBlock();
-                markBlockBusy(freeBlock);
-            } else {
-                freeBlock = openFile->inodeBuffer[currentInodeToLookAt];
-                if (freeBlock == UNASSIGNED_BLOCK) {
-                    freeBlock = findFreeBlock();
-                    markBlockBusy(freeBlock);
-                }
-                writeBlock(openFile->buffer, freeBlock);
-                currentInodeToLookAt += 1;
-            }
-            writeBlock(openFile->buffer, freeBlock);
-            filePos += _fs->blockSize;
-            i += 1;
-        }
-        openFile->writePtr = currentFileLenLeft - (i * _fs->blockSize);
+        writeFileIntoWriteBuffer(openFile, buffer, totalSize);
+    } else { 
+        // Once buffer is full
+        fillUpRestOfWriteBuffer(openFile, buffer, bytesLeftInBuffer);
+        writeFinishFileOntoDisk(openFile, buffer, totalSize - bytesLeftInBuffer);
 
-        memcpy(openFile->buffer, buffer + filePos, openFile->writePtr);
+        unsigned int updatedLen = getFileLength(openFile->filename);
+        printf("writeFile updatedLen: %d\ndataCount: %d\n", updatedLen, dataCount);
         if (openFile->openMode == MODE_READ_APPEND) {
-            updatedLen += filePos;
+            updatedLen += totalSize;
         } else {
-            updatedLen = filePos;
+            updatedLen = totalSize;
         }
+        updateDirectoryFileLength(openFile->filename, updatedLen);
     }
-    saveInode(openFile->inodeBuffer, fp);
+    saveInode(openFile->inodeBuffer, fileIdx);
 
-    updateDirectoryFileLength(openFile->filename, updatedLen);
     updateFreeList();
     updateDirectory();
 }
@@ -192,6 +120,7 @@ void flushFile(int fp)
         printf("flush before Inode[0] freeblock: %d\n", openFile->inodeBuffer[0]);
         setBlockNumInInode(openFile->inodeBuffer, curFileLen, freeBlock);
         printf("flush after Inode[0] freeblock: %d\n",openFile->inodeBuffer[0]);
+        printf("flush fileIdx: %d\n", fileIdx);
         saveInode(openFile->inodeBuffer, fileIdx);
         // Update file length
         updateDirectoryFileLength(openFile->filename, curFileLen);
@@ -311,6 +240,7 @@ void closeFS() {
     free(_oftMap);
     free(_oft);
 }
+
 unsigned int getFreeOftEntry() {
     int i;
     for (i=0; i < MAX_OFT_ENTRY; i++) {
@@ -319,4 +249,105 @@ unsigned int getFreeOftEntry() {
         }
     }
     return i;
+}
+
+int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode) {
+    updateOftEntry(oftEntry, fdIdx, mode, 0, 0, 0, filename);
+    return oftEntry;
+}
+
+int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode) {
+    unsigned int fileIdx = makeDirectoryEntry(filename, 0x0, 0);
+    updateOftEntry(oftEntry, fileIdx, mode, 0, 0, 0, filename);
+    if (_result == FS_FULL) { // ERROR when disk is full
+        _oftMap[oftEntry] = 0;
+        clearOftEntry(oftEntry);
+        _oftCount -= 1;
+        return FS_FULL;
+    }
+    updateFreeList();
+    updateDirectory();
+    return oftEntry;
+}
+
+// Updates entire oft entry. 
+void updateOftEntry(unsigned int oftIdx,unsigned int fdIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename) {
+    // Update oft
+    _oft[oftIdx].openMode = openMode;
+    _oft[oftIdx].blockSize = _fs->blockSize;
+    _oft[oftIdx].fdIdx = fdIdx;
+    _oft[oftIdx].inodeBuffer = makeInodeBuffer();
+    _oft[oftIdx].buffer = makeDataBuffer();
+    _oft[oftIdx].writePtr = writePtr;
+    _oft[oftIdx].readPtr = readPtr;
+    _oft[oftIdx].filePtr = filePtr;
+    _oft[oftIdx].filename = filename;
+}
+
+// Clears the oft entry
+void clearOftEntry(unsigned int oftIdx) {
+    _oft[oftIdx].openMode = 0;
+    _oft[oftIdx].blockSize = 0;
+    _oft[oftIdx].inode = 0;
+    _oft[oftIdx].fdIdx = 0;
+    free(_oft[oftIdx].inodeBuffer);
+    free(_oft[oftIdx].buffer);
+    _oft[oftIdx].writePtr = 0;
+    _oft[oftIdx].readPtr = 0;
+    _oft[oftIdx].filePtr = 0;
+    _oft[oftIdx].filename = NULL;
+}
+
+void writeFileIntoWriteBuffer(TOpenFile *openFile,void *buffer, unsigned int writeSize) {
+    memcpy(openFile->buffer + openFile->writePtr, buffer, writeSize);
+    openFile->writePtr += writeSize;
+}
+
+void fillUpRestOfWriteBuffer(TOpenFile *openFile, void *buffer, unsigned int writeSize) {
+    memcpy(openFile->buffer + openFile->writePtr, buffer, writeSize);
+    unsigned long freeBlock = -1;
+    if (openFile->openMode == MODE_READ_APPEND) {
+        freeBlock = findFreeBlock();
+        markBlockBusy(freeBlock);
+        writeBlock(openFile->buffer, freeBlock);
+    } else {
+        freeBlock = openFile->inodeBuffer[0];
+        if (freeBlock == UNASSIGNED_BLOCK) {
+            freeBlock = findFreeBlock();
+            markBlockBusy(freeBlock);
+        }
+        writeBlock(openFile->buffer, freeBlock);
+    }
+    // Reset write ptr to 0
+    openFile->writePtr = 0;
+    openFile->filePtr = writeSize;
+}
+
+void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int writeSize) {
+    // Continue to read blocks of file continuously
+    unsigned int numWriteItr = writeSize / _fs->blockSize;
+    unsigned int i = 0;
+    unsigned int filePos = openFile->filePtr;
+    unsigned int currentInodeToLookAt = 1;
+    unsigned long freeBlock = -1;
+    while (i < numWriteItr) {
+        memcpy(openFile->buffer, buffer + filePos, _fs->blockSize);
+        if (openFile->openMode == MODE_READ_APPEND) {
+            freeBlock = findFreeBlock();
+            markBlockBusy(freeBlock);
+        } else {
+            freeBlock = openFile->inodeBuffer[currentInodeToLookAt];
+            if (freeBlock == UNASSIGNED_BLOCK) {
+                freeBlock = findFreeBlock();
+                markBlockBusy(freeBlock);
+            }
+            writeBlock(openFile->buffer, freeBlock);
+            currentInodeToLookAt += 1;
+        }
+        writeBlock(openFile->buffer, freeBlock);
+        filePos += _fs->blockSize;
+        i += 1;
+    }
+    openFile->writePtr = writeSize - (i * _fs->blockSize);
+    memcpy(openFile->buffer, buffer + filePos, openFile->writePtr);
 }
