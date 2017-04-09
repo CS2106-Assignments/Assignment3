@@ -22,6 +22,10 @@ unsigned int getFreeOftEntry();
 void writeFileIntoWriteBuffer(TOpenFile *openFile,void *buffer, unsigned int writeSize);
 void fillUpRestOfWriteBuffer(TOpenFile *openFile, void *buffer, unsigned int writeSize);
 void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int writeSize);
+void readDataIntoBuffer(TOpenFile *openFile, void *buffer, unsigned int readSize);
+void readRestOfReadBuffer(TOpenFile *openFile, void *buffer);
+void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int readSize);
+void updateFileLen(TOpenFile *openFile, unsigned int writeSize);
 
 // Mounts a paritition given in fsPartitionName. Must be called before all
 // other functions
@@ -59,6 +63,8 @@ int openFile(const char *filename, unsigned char mode)
     return FS_FILE_NOT_FOUND;
 }
 
+
+
 // Write data to the file. File must be opened in MODE_NORMAL or MODE_CREATE modes. Does nothing
 // if file is opened in MODE_READ_ONLY mode.
 void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
@@ -66,14 +72,13 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
     if (_oft[fp].openMode == MODE_READ_ONLY || _oftMap[fp] == 0) {
         return;
     }
-    int totalSize = dataSize * dataCount;
     TOpenFile *openFile = &_oft[fp];
+    unsigned int totalSize = dataSize * dataCount;
     unsigned int fileIdx = openFile->fdIdx;
-    loadInode(openFile->inodeBuffer, fileIdx);
-
     unsigned long freeBlock = -1;
     unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->writePtr;
     unsigned int writeSize = 0;
+    loadInode(openFile->inodeBuffer, fileIdx);
     // If the buffer is still not full
     if (totalSize < bytesLeftInBuffer) {
         writeFileIntoWriteBuffer(openFile, buffer, totalSize);
@@ -81,25 +86,13 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
         // Once buffer is full
         fillUpRestOfWriteBuffer(openFile, buffer, bytesLeftInBuffer);
         writeFinishFileOntoDisk(openFile, buffer, totalSize - bytesLeftInBuffer);
+        updateFileLen(openFile, totalSize);
 
-        unsigned int updatedLen = getFileLength(openFile->filename);
-        printf("writeFile updatedLen: %d\ndataCount: %d\n", updatedLen, dataCount);
-        if (openFile->openMode == MODE_READ_APPEND) {
-            updatedLen += totalSize;
-        } else {
-            updatedLen = totalSize;
-        }
-        updateDirectoryFileLength(openFile->filename, updatedLen);
     }
     saveInode(openFile->inodeBuffer, fileIdx);
 
     updateFreeList();
     updateDirectory();
-}
-
-int calcNumBlocksRequired(unsigned int blockSize, unsigned dataSize, unsigned int dataCount) {
-    int totalSize = dataSize * dataCount;
-    return totalSize/blockSize;
 }
 
 // Flush the file data to the disk. Writes all data buffers, updates directory,
@@ -127,10 +120,13 @@ void flushFile(int fp)
     }
     _oft[fp].writePtr = 0;
     _oft[fp].readPtr = 0;
+    _oft[fp].filePtr = 0;
 
     updateFreeList();
     updateDirectory();
 }
+
+
 
 // Read data from the file.
 void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
@@ -142,45 +138,16 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
     unsigned long blockNumber = -1;
     loadInode(openFile->inodeBuffer, dirIdx);
     printf("readFile Inode[0]: %d\n", openFile->inodeBuffer[0]);
-    char *readBuffer = (char *) malloc(_fs->blockSize);
     unsigned int readFileLen = 0;
     unsigned int filePos = 0;
     unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->readPtr;
     if (totalReadSize < bytesLeftInBuffer) {
-        blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, totalReadSize);
-        printf("Free Block in readFile: %d\ntotalReadSize: %d\n", blockNumber, totalReadSize);
-        readBlock(readBuffer, blockNumber);
-        memcpy(openFile->buffer + openFile->readPtr, readBuffer, totalReadSize);
-        openFile->readPtr += totalReadSize;
-        memcpy(buffer, openFile->buffer, openFile->readPtr);
+        readDataIntoBuffer(openFile, buffer, totalReadSize);
     } else {
-        blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, bytesLeftInBuffer);
-        readBlock(readBuffer, blockNumber);
-        memcpy(openFile->buffer + openFile->readPtr, readBuffer, bytesLeftInBuffer);
-        memcpy(buffer, openFile->buffer, _fs->blockSize);
-
-        // Number of read iterations
-        unsigned int curFileLen = totalReadSize - bytesLeftInBuffer;
-        unsigned int readItr = curFileLen / _fs->blockSize;
-        unsigned int i=0;
-        readFileLen = bytesLeftInBuffer;
-        filePos = bytesLeftInBuffer;
-        while (i < readItr) {
-            readFileLen += _fs->blockSize;
-            blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readFileLen);
-            readBlock(readBuffer, blockNumber);
-            memcpy(buffer + filePos, readBuffer, _fs->blockSize);
-        }
-        openFile->readPtr = totalReadSize - readFileLen;
-
-        if (openFile->readPtr) {
-            blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, totalReadSize);
-            readBlock(readBuffer, blockNumber);
-            memcpy(openFile->buffer, readBuffer, openFile->readPtr);
-        }
+        readRestOfReadBuffer(openFile, buffer);
+        readRestOfFileFromDisk(openFile, buffer, totalReadSize - bytesLeftInBuffer);
     }
 
-    free(readBuffer);
     updateFreeList();
     updateDirectory();
 }
@@ -350,4 +317,59 @@ void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int wri
     }
     openFile->writePtr = writeSize - (i * _fs->blockSize);
     memcpy(openFile->buffer, buffer + filePos, openFile->writePtr);
+}
+
+void readDataIntoBuffer(TOpenFile *openFile, void *buffer, unsigned int readSize) {
+    unsigned long blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readSize);
+    printf("Free Block in readFile: %d\ntotalReadSize: %d\n", blockNumber, readSize);
+    if (openFile->readPtr) {
+        memcpy(buffer, openFile->buffer, openFile->readPtr);
+        openFile->filePtr = openFile->readPtr;
+    } 
+    readBlock(openFile->buffer, blockNumber);
+    memcpy(buffer + openFile->filePtr, openFile->buffer, readSize);
+}
+
+void readRestOfReadBuffer(TOpenFile *openFile, void *buffer) {
+    if (openFile->readPtr) {
+        memcpy(buffer, openFile->buffer, openFile->readPtr);
+        openFile->filePtr = openFile->readPtr;
+        openFile->readPtr = 0;
+    }
+}
+
+void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int readSize) {
+    // Number of read iterations
+    unsigned int curFileLen = readSize - openFile->readPtr;
+    unsigned int readItr = curFileLen / _fs->blockSize;
+    unsigned int i = 0;
+    unsigned int readFileLen = openFile->filePtr;
+    unsigned int filePos = openFile->filePtr;
+    unsigned int blockNumber = -1;
+    while (i < readItr) {
+        readFileLen += _fs->blockSize;
+        blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readFileLen);
+        readBlock(openFile->buffer, blockNumber);
+        memcpy(buffer + filePos, openFile->buffer, _fs->blockSize);
+        filePos += _fs->blockSize;
+        i++;
+    }
+    openFile->readPtr = readSize - readFileLen;
+
+    if (openFile->readPtr) {
+        blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readSize);
+        readBlock(openFile->buffer, blockNumber);
+        memcpy(buffer+ filePos, openFile, openFile->readPtr);
+    }
+}
+
+void updateFileLen(TOpenFile *openFile, unsigned int writeSize) {
+    unsigned int updatedLen = getFileLength(openFile->filename);
+    printf("writeFile updatedLen: %d\ndataCount: %d\n", updatedLen, writeSize);
+    if (openFile->openMode == MODE_READ_APPEND) {
+        updatedLen += writeSize;
+    } else {
+        updatedLen = writeSize;
+    }
+    updateDirectoryFileLength(openFile->filename, updatedLen);
 }
