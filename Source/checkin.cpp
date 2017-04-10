@@ -20,6 +20,10 @@ int main(int ac, char **av)
 	fp = openFile(av[1], MODE_CREATE);
 
     FILE *file = fopen(av[1], "r");
+    if (file == NULL) {
+        printf("The file you want to checkin does not exist!\n");
+        return -1;
+    }
 
 	// obtain file size:
 	fseek(file, 0, SEEK_END);
@@ -33,18 +37,15 @@ int main(int ac, char **av)
 	// Read the file
 	fread(buffer, sizeof(char), lSize, file);
     buffer[len-1] = '\0';
-
-    printf("%s\n", buffer);
-
-	// Write to file
+	// Write to filesystem
 	writeFile(fp, buffer, sizeof(char), lSize);
     closeFile(fp);
+
+    printf("File: %s has been checkedin!\n", av[1]);
 	// Unmount
 	closeFS();
-
 	// Free buffer
 	free(buffer);
-
 	// Close file
 	fclose(file);
     return 0;

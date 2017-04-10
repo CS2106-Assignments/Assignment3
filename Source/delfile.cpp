@@ -16,6 +16,18 @@ int main(int ac, char **av)
         return -1;
     }
     delFile(av[1]);
+    if (findFile(av[1]) == FS_FILE_NOT_FOUND) {
+        printf("File: %s has been deleted!\n",av[1]);
+    } else {
+        printf("File: %s cannot be deleted. Attribute is ", av[1]);
+        unsigned int attr = getattr(av[1]);
+        if (attr == 0b01) {
+            printf("W\n");
+        }
+        if (attr == 0b10) {
+            printf("R\n");
+        }
+    }
     closeFile(file);
     closeFS();
 

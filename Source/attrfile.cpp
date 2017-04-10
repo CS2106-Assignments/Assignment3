@@ -19,8 +19,10 @@ int main(int ac, char **av)
     }
     if(toupper(*av[2]) == 'R') {
         setattr(av[1], 0b10);
+        printf("File: %s attribute set to R\n", av[1]);
     } else if (toupper(*av[2]) == 'W') {
         setattr(av[1], 0b01);
+        printf("File: %s attribute set to W\n", av[1]);
     } else {
         printf("Invalid attribute\n");
     }

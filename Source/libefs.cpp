@@ -1,6 +1,5 @@
 #include "libefs.h"
 #define UNASSIGNED_BLOCK 0
-#define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
 #define MAX_OFT_ENTRY 1024
 
 // FS Descriptor
@@ -11,7 +10,7 @@ TOpenFile *_oft;
 bool *_oftMap;
 
 // Open file table counter
-int _oftCount=0;
+int _oftCount = 0;
 
 
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode); 
@@ -26,6 +25,7 @@ void readDataIntoBuffer(TOpenFile *openFile, void *buffer, unsigned int readSize
 void readRestOfReadBuffer(TOpenFile *openFile, void *buffer);
 void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int readSize);
 void updateFileLen(TOpenFile *openFile, unsigned int writeSize);
+void freeAllOft();
 
 // Mounts a paritition given in fsPartitionName. Must be called before all
 // other functions
@@ -100,18 +100,13 @@ void flushFile(int fp)
     TOpenFile *openFile = &_oft[fp];
     if (openFile->writePtr > 0) {
         unsigned long freeBlock = findFreeBlock();
-        printf("Free block in flush: %d\n", freeBlock);
         unsigned int fileIdx = openFile->fdIdx;
         markBlockBusy(freeBlock);
         writeBlock(openFile->buffer, freeBlock);
         loadInode(openFile->inodeBuffer, fileIdx);
         unsigned int curFileLen = getFileLength(openFile->filename) + openFile->writePtr;
-        printf("flush curFileLen: %d\nflush openFile writePtr:%d\n", curFileLen, openFile->writePtr);
         // Find the inode to put in
-        printf("flush before Inode[0] freeblock: %d\n", openFile->inodeBuffer[0]);
         setBlockNumInInode(openFile->inodeBuffer, curFileLen, freeBlock);
-        printf("flush after Inode[0] freeblock: %d\n",openFile->inodeBuffer[0]);
-        printf("flush fileIdx: %d\n", fileIdx);
         saveInode(openFile->inodeBuffer, fileIdx);
         // Update file length
         updateDirectoryFileLength(openFile->filename, curFileLen);
@@ -132,10 +127,8 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
     TOpenFile *openFile = &_oft[fp];
     unsigned int totalReadSize = dataSize * dataCount;
     unsigned int dirIdx = openFile->fdIdx;
-    printf("readFile filename: %s\nDescriptor Id: %d\n", openFile->filename, dirIdx);
     unsigned long blockNumber = -1;
     loadInode(openFile->inodeBuffer, dirIdx);
-    printf("readFile Inode[0]: %d\n", openFile->inodeBuffer[0]);
     unsigned int readFileLen = 0;
     unsigned int filePos = 0;
     unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->readPtr;
@@ -202,13 +195,15 @@ void closeFile(int fp) {
 void closeFS() {
     unmountFS();
     // Go into every oft entry and free (close) everything if possible
+    freeAllOft();
     free(_oftMap);
     free(_oft);
 }
 
+// Obtains the free entry on the open file table
 unsigned int getFreeOftEntry() {
     int i;
-    for (i=0; i < MAX_OFT_ENTRY; i++) {
+    for (i = 0; i < MAX_OFT_ENTRY; i++) {
         if (_oftMap[i] == 0) {
             break;
         }
@@ -216,11 +211,23 @@ unsigned int getFreeOftEntry() {
     return i;
 }
 
+void freeAllOft() {
+    int i;
+    for(i = 0; i < MAX_OFT_ENTRY; i++) {
+        if (_oftMap[i] == 1) {
+            _oftMap[i] = 0;
+            clearOftEntry(i);
+        }
+    }
+}
+
+// Opens the file is it is found, returns the index of the open file table
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode) {
     updateOftEntry(oftEntry, fdIdx, mode, 0, 0, 0, filename);
     return oftEntry;
 }
 
+// Creates the file if it is not found, returns the index on the open file table
 int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode) {
     unsigned int fileIdx = makeDirectoryEntry(filename, 0x0, 0);
     updateOftEntry(oftEntry, fileIdx, mode, 0, 0, 0, filename);
@@ -263,11 +270,13 @@ void clearOftEntry(unsigned int oftIdx) {
     _oft[oftIdx].filename = NULL;
 }
 
+// Writes file into the write buffer and updates the write pointer.
 void writeFileIntoWriteBuffer(TOpenFile *openFile,void *buffer, unsigned int writeSize) {
     memcpy(openFile->buffer + openFile->writePtr, buffer, writeSize);
     openFile->writePtr += writeSize;
 }
 
+// Fills up the rest of the write buffer as much as possible.
 void fillUpRestOfWriteBuffer(TOpenFile *openFile, void *buffer, unsigned int writeSize) {
     memcpy(openFile->buffer + openFile->writePtr, buffer, writeSize);
     unsigned long freeBlock = -1;
@@ -288,6 +297,8 @@ void fillUpRestOfWriteBuffer(TOpenFile *openFile, void *buffer, unsigned int wri
     openFile->filePtr = writeSize;
 }
 
+// Write the rest of the data into the disk.
+// Data that is not able to fully fit into the blockSize will remain in the write buffer.
 void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int writeSize) {
     // Continue to read blocks of file continuously
     unsigned int numWriteItr = writeSize / _fs->blockSize;
@@ -317,9 +328,9 @@ void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int wri
     memcpy(openFile->buffer, buffer + filePos, openFile->writePtr);
 }
 
+// Reads the data from the read buffer into the output buffer when the data to read is smaller than the readbuffer.
 void readDataIntoBuffer(TOpenFile *openFile, void *buffer, unsigned int readSize) {
     unsigned long blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readSize);
-    printf("Free Block in readFile: %d\ntotalReadSize: %d\n", blockNumber, readSize);
     if (openFile->readPtr) {
         memcpy(buffer, openFile->buffer, openFile->readPtr);
         openFile->filePtr = openFile->readPtr;
@@ -328,6 +339,7 @@ void readDataIntoBuffer(TOpenFile *openFile, void *buffer, unsigned int readSize
     memcpy(buffer + openFile->filePtr, openFile->buffer, readSize);
 }
 
+// Reads the rest of the data from the read buffer onto the output buffer.
 void readRestOfReadBuffer(TOpenFile *openFile, void *buffer) {
     if (openFile->readPtr) {
         memcpy(buffer, openFile->buffer, openFile->readPtr);
@@ -336,6 +348,7 @@ void readRestOfReadBuffer(TOpenFile *openFile, void *buffer) {
     }
 }
 
+// Reads the rest of the data on the disk into the output buffer.
 void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int readSize) {
     // Number of read iterations
     unsigned int curFileLen = readSize - openFile->readPtr;
@@ -361,9 +374,9 @@ void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int read
     }
 }
 
+// Updates the file length after writing
 void updateFileLen(TOpenFile *openFile, unsigned int writeSize) {
     unsigned int updatedLen = getFileLength(openFile->filename);
-    printf("writeFile updatedLen: %d\ndataCount: %d\n", updatedLen, writeSize);
     if (openFile->openMode == MODE_READ_APPEND) {
         updatedLen += writeSize;
     } else {

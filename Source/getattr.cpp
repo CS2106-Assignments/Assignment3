@@ -17,12 +17,11 @@ int main(int ac, char **av)
         printf("FILE NOT FOUND\n");
     } else {
         unsigned int attr = getattr(av[1]);
-        printf("file: %d\n",file);
-        printf("attr: %d\n",attr);
-        if(attr == 0b01) {
+        printf("File: %s attribute is ", av[1]);
+        if (attr == 0b01) {
             printf("W\n");
         }
-        if(attr == 0b10) {
+        if (attr == 0b10) {
             printf("R\n");
         }
         closeFile(file);

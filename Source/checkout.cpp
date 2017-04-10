@@ -27,14 +27,18 @@ int main(int ac, char **av)
 	// Write the data
 	readFile(fileNdx, buffer, sizeof(char), len - 1);
     buffer[len-1] = '\0';
-    printf("\nBUFFER: %s\n", buffer);
     
 	// Close the file
 	closeFile(fileNdx);
 
     FILE *fp = fopen(av[1], "w");
 
+    if (fp == NULL) {
+        printf("File cannot be written out\n");
+        return -1;
+    }
     fwrite(buffer,sizeof(char), len, fp);
+    printf("Checkout successfull!\nFile: %s created!\n", av[1]);
 	free(buffer);
 	// Unmount the file system
 	closeFS();
