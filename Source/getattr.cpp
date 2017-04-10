@@ -8,23 +8,25 @@ int main(int ac, char **av)
 		printf("Prints: 'R' = Read only, 'W' = Read/Write\n\n");
 		return -1;
 	}
-    
-    int file = openFile(av[1], 0);
-
+    initFS("part.dsk", "");
+    unsigned int file = openFile(av[1], MODE_NORMAL);
     if(file == -1) {
         return -1;
     }
     else if(file == FS_FILE_NOT_FOUND) {
-        printf("FILE NOT FOUND");
+        printf("FILE NOT FOUND\n");
     } else {
         unsigned int attr = getattr(av[1]);
-        if(attr == 0) {
-            printf("W");
+        printf("file: %d\n",file);
+        printf("attr: %d\n",attr);
+        if(attr == 0b01) {
+            printf("W\n");
         }
-        if(attr == 2) {
-            printf("R");
+        if(attr == 0b10) {
+            printf("R\n");
         }
+        closeFile(file);
     }
-    closeFile(file);
+    closeFS();
 	return 0;
 }
