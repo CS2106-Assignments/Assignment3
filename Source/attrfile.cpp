@@ -8,6 +8,7 @@ int main(int ac, char **av)
 		printf("Attribute: 'R' = Read only, 'W' = Read/Write\n\n");
 		return -1;
 	}
+    initFS("part.dsk", "");
     int file = openFile(av[1], '0');
     if(file == FS_FILE_NOT_FOUND) {
         printf("FILE NOT FOUND\n");
@@ -17,12 +18,13 @@ int main(int ac, char **av)
         return -1;
     }
     if(toupper(*av[2]) == 'R') {
-        setattr(av[1], '2');
+        setattr(av[1], 0b10);
     } else if (toupper(*av[2]) == 'W') {
-        setattr(av[1], '1');
+        setattr(av[1], 0b01);
     } else {
-        printf("Invalid attribute");
+        printf("Invalid attribute\n");
     }
     closeFile(file);
+    closeFS();
 	return 0;
 }

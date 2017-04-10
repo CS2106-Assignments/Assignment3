@@ -157,7 +157,7 @@ void delFile(const char *filename) {
     unsigned int attr = getattr(filename);
 
     // Read-only flag is true (bit 2 of attr field is set to 1)
-    if (CHECK_BIT(attr, 2)) {
+    if (attr == 0b10) {
         return;
     }
     unsigned int dirIdx = findFile(filename);
