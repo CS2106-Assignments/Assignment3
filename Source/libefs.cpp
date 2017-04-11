@@ -33,8 +33,8 @@ void initFS(const char *fsPartitionName, const char *fsPassword)
 {
     mountFS(fsPartitionName, fsPassword);
     _fs = getFSInfo();
-    _oft = (TOpenFile *) malloc(sizeof(TOpenFile*) * MAX_OFT_ENTRY);
-    _oftMap = (bool *) malloc(sizeof(bool *) * MAX_OFT_ENTRY);
+    _oft = (TOpenFile *) malloc(sizeof(TOpenFile) * MAX_OFT_ENTRY);
+    _oftMap = (bool *) malloc(sizeof(bool) * MAX_OFT_ENTRY);
 }
 
 // Opens a file in the partition. Depending on mode, a new file may be created
@@ -44,7 +44,7 @@ void initFS(const char *fsPartitionName, const char *fsPassword)
 int openFile(const char *filename, unsigned char mode)
 {
     _oftCount += 1;
-    if (_oftCount >= MAX_OFT_ENTRY) {
+    if (_oftCount > MAX_OFT_ENTRY) {
         _oftCount = MAX_OFT_ENTRY-1;
         return OPEN_FILE_TABLE_FULL;
     }
@@ -119,8 +119,6 @@ void flushFile(int fp)
     updateDirectory();
 }
 
-
-
 // Read data from the file.
 void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCount)
 {
@@ -193,11 +191,12 @@ void closeFile(int fp) {
 
 // Unmount file system.
 void closeFS() {
-    unmountFS();
     // Go into every oft entry and free (close) everything if possible
     freeAllOft();
     free(_oftMap);
     free(_oft);
+    
+    unmountFS();
 }
 
 // Obtains the free entry on the open file table
@@ -216,7 +215,7 @@ void freeAllOft() {
     for(i = 0; i < MAX_OFT_ENTRY; i++) {
         if (_oftMap[i] == 1) {
             _oftMap[i] = 0;
-            clearOftEntry(i);
+            closeFile(i);
         }
     }
 }

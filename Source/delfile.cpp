@@ -8,11 +8,13 @@ int main(int ac, char **av)
 		return -1;
 	}
     initFS("part.dsk", "");
-    int file = openFile(av[1], 0);
+    int file = openFile(av[1], MODE_READ_ONLY);
     if(file == FS_FILE_NOT_FOUND) {
         printf("FILE NOT FOUND\n");
+        return -1;
     }
-    if(file == -1) {
+    if(file == OPEN_FILE_TABLE_FULL) {
+        printf("Open file table full\n");
         return -1;
     }
     delFile(av[1]);
