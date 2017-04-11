@@ -12,7 +12,6 @@ bool *_oftMap;
 // Open file table counter
 int _oftCount = 0;
 
-
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode); 
 int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode);
 void updateOftEntry(unsigned int oftIdx,unsigned int fdIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename);
@@ -99,17 +98,36 @@ void flushFile(int fp)
 {
     TOpenFile *openFile = &_oft[fp];
     if (openFile->writePtr > 0) {
-        unsigned long freeBlock = findFreeBlock();
         unsigned int fileIdx = openFile->fdIdx;
-        markBlockBusy(freeBlock);
-        writeBlock(openFile->buffer, freeBlock);
-        loadInode(openFile->inodeBuffer, fileIdx);
-        unsigned int curFileLen = getFileLength(openFile->filename) + openFile->writePtr;
-        // Find the inode to put in
-        setBlockNumInInode(openFile->inodeBuffer, curFileLen, freeBlock);
-        saveInode(openFile->inodeBuffer, fileIdx);
-        // Update file length
-        updateDirectoryFileLength(openFile->filename, curFileLen);
+        unsigned long fileLen = getFileLength(openFile->filename);
+        unsigned int needNewBlock = fileLen % _fs->blockSize;
+        if (!needNewBlock) {
+            unsigned long freeBlock = findFreeBlock();
+            markBlockBusy(freeBlock);
+            writeBlock(openFile->buffer, freeBlock);
+            loadInode(openFile->inodeBuffer, fileIdx);
+            unsigned int curFileLen = fileLen + openFile->writePtr;
+            // Find the inode to put in
+            setBlockNumInInode(openFile->inodeBuffer, curFileLen, freeBlock);
+            saveInode(openFile->inodeBuffer, fileIdx);
+            // Update file length
+            updateDirectoryFileLength(openFile->filename, curFileLen);
+
+        } else {
+            unsigned long freeBlock = returnBlockNumFromInode(openFile->inodeBuffer, fileLen);
+            char *buffer = makeDataBuffer();
+            unsigned int writeItr = fileLen/ _fs->blockSize;
+            unsigned int offsetWritePtr = fileLen - writeItr * _fs->blockSize;
+            loadInode(openFile->inodeBuffer, fileIdx);
+            readBlock(buffer, freeBlock);
+            memcpy(buffer + offsetWritePtr, openFile->buffer, openFile->writePtr);
+            writeBlock(buffer, freeBlock);
+            openFile->inodeBuffer[writeItr] = freeBlock;
+            saveInode(openFile->inodeBuffer, fileIdx);
+            free(buffer);
+            unsigned int curFileLen = fileLen + openFile->writePtr;
+            updateDirectoryFileLength(openFile->filename, curFileLen);
+        }
     }
     _oft[fp].writePtr = 0;
     _oft[fp].readPtr = 0;
@@ -195,7 +213,7 @@ void closeFS() {
     freeAllOft();
     free(_oftMap);
     free(_oft);
-    
+
     unmountFS();
 }
 

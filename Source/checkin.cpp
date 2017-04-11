@@ -20,7 +20,8 @@ int main(int ac, char **av)
     int fp = openFile(av[1], MODE_READ_ONLY);
 
     if (fp != FS_FILE_NOT_FOUND) {
-        printf("\nDUPLICATE FILE %s\n\n", av[1]);
+        printf("Duplicated File %s is in Filesystem\n", av[1]);
+        closeFS();
         exit(FS_DUPLICATE_FILE);
     }
 
@@ -31,13 +32,11 @@ int main(int ac, char **av)
     long lSize = ftell(file);
     rewind(file);
 
-    int len = lSize + 1;
     // allocate memory to contain the whole file:
-    char *buffer = (char*)malloc(sizeof(char)*(len));
+    char *buffer = (char*)malloc(sizeof(char)*(lSize));
 
     // Read the file
     fread(buffer, sizeof(char), lSize, file);
-    buffer[len-1] = '\0';
     // Write to filesystem
     writeFile(fp, buffer, sizeof(char), lSize);
     closeFile(fp);
