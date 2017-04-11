@@ -1,18 +1,17 @@
 #include "libefs.h"
 #define UNASSIGNED_BLOCK 0
 #define CHECK_BIT(var,pos) ((var) & (1<<(pos)))
-#define MAX_OFT_ENTRY 1024
+#define MAX_OFT_ENTRY 2
 
 // FS Descriptor
 TFileSystemStruct *_fs;
 
 // Open File Table
-TOpenFile *_oft;
-bool *_oftMap;
+TOpenFile _oft[MAX_OFT_ENTRY];
+unsigned char _oftMap[MAX_OFT_ENTRY];
 
 // Open file table counter
 int _oftCount=0;
-
 
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode); 
 int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode);
@@ -26,6 +25,7 @@ void readDataIntoBuffer(TOpenFile *openFile, void *buffer, unsigned int readSize
 void readRestOfReadBuffer(TOpenFile *openFile, void *buffer);
 void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int readSize);
 void updateFileLen(TOpenFile *openFile, unsigned int writeSize);
+void closeAllOpenFiles();
 
 // Mounts a paritition given in fsPartitionName. Must be called before all
 // other functions
@@ -33,8 +33,10 @@ void initFS(const char *fsPartitionName, const char *fsPassword)
 {
     mountFS(fsPartitionName, fsPassword);
     _fs = getFSInfo();
-    _oft = (TOpenFile *) malloc(sizeof(TOpenFile*) * MAX_OFT_ENTRY);
-    _oftMap = (bool *) malloc(sizeof(bool *) * MAX_OFT_ENTRY);
+    int i=0;
+    for(i = 0; i < MAX_OFT_ENTRY; i++) {
+        _oftMap[i] = 0;
+    }
 }
 
 // Opens a file in the partition. Depending on mode, a new file may be created
@@ -43,15 +45,14 @@ void initFS(const char *fsPartitionName, const char *fsPassword)
 // disk is full when mode is MODE_CREATE, etc.
 int openFile(const char *filename, unsigned char mode)
 {
-    _oftCount += 1;
-    if (_oftCount >= MAX_OFT_ENTRY) {
+    _oftCount +=1;
+    if (_oftCount > MAX_OFT_ENTRY) {
         _oftCount = MAX_OFT_ENTRY-1;
         return OPEN_FILE_TABLE_FULL;
     }
     unsigned int fileIdx = findFile(filename);
     unsigned int freeOftEntry = getFreeOftEntry();
-    _oftMap[freeOftEntry] = 1;
-
+    int i;
     if (_result != FS_FILE_NOT_FOUND) { // If found
         return openFileIsFound(freeOftEntry, fileIdx, filename, mode);
     }
@@ -200,20 +201,21 @@ void closeFile(int fp) {
 
 // Unmount file system.
 void closeFS() {
+    closeAllOpenFiles();
     unmountFS();
-    // Go into every oft entry and free (close) everything if possible
-    free(_oftMap);
-    free(_oft);
 }
 
 unsigned int getFreeOftEntry() {
     int i;
+    unsigned int output = -1;
     for (i=0; i < MAX_OFT_ENTRY; i++) {
         if (_oftMap[i] == 0) {
+            _oftMap[i] = 1;
+            output = i;
             break;
         }
     }
-    return i;
+    return output;
 }
 
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode) {
@@ -370,4 +372,14 @@ void updateFileLen(TOpenFile *openFile, unsigned int writeSize) {
         updatedLen = writeSize;
     }
     updateDirectoryFileLength(openFile->filename, updatedLen);
+}
+
+void closeAllOpenFiles() {
+    int i;
+    for(i = 0; i < MAX_OFT_ENTRY; i++) {
+        if(_oftMap[i] == 1) {
+            _oftMap[i] = 0;
+            closeFile(i);
+        }
+    }
 }
