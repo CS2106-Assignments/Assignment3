@@ -14,7 +14,7 @@ int _oftCount = 0;
 
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode); 
 int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode);
-void updateOftEntry(unsigned int oftIdx,unsigned int fdIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename);
+void updateOftEntry(unsigned int oftIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename);
 void clearOftEntry(unsigned int oftIdx); 
 unsigned int getFreeOftEntry();
 void writeFileIntoWriteBuffer(TOpenFile *openFile,void *buffer, unsigned int writeSize);
@@ -71,7 +71,7 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
     }
     TOpenFile *openFile = &_oft[fp];
     unsigned int totalSize = dataSize * dataCount;
-    unsigned int fileIdx = openFile->fdIdx;
+    unsigned int fileIdx = findFile(openFile->filename);
     unsigned long freeBlock = -1;
     unsigned int bytesLeftInBuffer = _fs->blockSize - openFile->writePtr;
     unsigned int writeSize = 0;
@@ -84,7 +84,6 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
         fillUpRestOfWriteBuffer(openFile, buffer, bytesLeftInBuffer);
         writeFinishFileOntoDisk(openFile, buffer, totalSize - bytesLeftInBuffer);
         updateFileLen(openFile, totalSize);
-
     }
     saveInode(openFile->inodeBuffer, fileIdx);
 
@@ -97,11 +96,11 @@ void writeFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCou
 void flushFile(int fp)
 {
     TOpenFile *openFile = &_oft[fp];
-    if (openFile->writePtr > 0) {
-        unsigned int fileIdx = openFile->fdIdx;
+    if (openFile->writePtr > 0) { // If there is some data to write to disk
+        unsigned int fileIdx = findFile(openFile->filename);
         unsigned long fileLen = getFileLength(openFile->filename);
         unsigned int needNewBlock = fileLen % _fs->blockSize;
-        if (!needNewBlock) {
+        if (!needNewBlock) { // If a new block of memory is needed
             unsigned long freeBlock = findFreeBlock();
             markBlockBusy(freeBlock);
             writeBlock(openFile->buffer, freeBlock);
@@ -112,8 +111,7 @@ void flushFile(int fp)
             saveInode(openFile->inodeBuffer, fileIdx);
             // Update file length
             updateDirectoryFileLength(openFile->filename, curFileLen);
-
-        } else {
+        } else { 
             unsigned long freeBlock = returnBlockNumFromInode(openFile->inodeBuffer, fileLen);
             char *buffer = makeDataBuffer();
             unsigned int writeItr = fileLen/ _fs->blockSize;
@@ -142,7 +140,7 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
 {
     TOpenFile *openFile = &_oft[fp];
     unsigned int totalReadSize = dataSize * dataCount;
-    unsigned int dirIdx = openFile->fdIdx;
+    unsigned int dirIdx = findFile(openFile->filename);
     unsigned long blockNumber = -1;
     loadInode(openFile->inodeBuffer, dirIdx);
     unsigned int readFileLen = 0;
@@ -154,7 +152,6 @@ void readFile(int fp, void *buffer, unsigned int dataSize, unsigned int dataCoun
         readRestOfReadBuffer(openFile, buffer);
         readRestOfFileFromDisk(openFile, buffer, totalReadSize - bytesLeftInBuffer);
     }
-
     updateFreeList();
     updateDirectory();
 }
@@ -166,7 +163,7 @@ void delFile(const char *filename) {
     unsigned int attr = getattr(filename);
 
     // Read-only flag is true (bit 2 of attr field is set to 1)
-    if (attr == 0b10) {
+    if ((attr>>1) & 1) {
         return;
     }
     unsigned int dirIdx = findFile(filename);
@@ -228,6 +225,7 @@ unsigned int getFreeOftEntry() {
     return i;
 }
 
+// Frees all of the oft table entries.
 void freeAllOft() {
     int i;
     for(i = 0; i < MAX_OFT_ENTRY; i++) {
@@ -240,14 +238,14 @@ void freeAllOft() {
 
 // Opens the file is it is found, returns the index of the open file table
 int openFileIsFound(unsigned int oftEntry, unsigned int fdIdx, const char *filename, unsigned char mode) {
-    updateOftEntry(oftEntry, fdIdx, mode, 0, 0, 0, filename);
+    updateOftEntry(oftEntry, mode, 0, 0, 0, filename);
     return oftEntry;
 }
 
 // Creates the file if it is not found, returns the index on the open file table
 int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned char mode) {
     unsigned int fileIdx = makeDirectoryEntry(filename, 0x0, 0);
-    updateOftEntry(oftEntry, fileIdx, mode, 0, 0, 0, filename);
+    updateOftEntry(oftEntry, mode, 0, 0, 0, filename);
     if (_result == FS_FULL) { // ERROR when disk is full
         _oftMap[oftEntry] = 0;
         clearOftEntry(oftEntry);
@@ -260,11 +258,10 @@ int openFileCreateNewFile(unsigned int oftEntry, const char *filename, unsigned 
 }
 
 // Updates entire oft entry. 
-void updateOftEntry(unsigned int oftIdx,unsigned int fdIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename) {
+void updateOftEntry(unsigned int oftIdx, unsigned char openMode, unsigned int writePtr, unsigned int readPtr, unsigned int filePtr, const char * filename) {
     // Update oft
     _oft[oftIdx].openMode = openMode;
     _oft[oftIdx].blockSize = _fs->blockSize;
-    _oft[oftIdx].fdIdx = fdIdx;
     _oft[oftIdx].inodeBuffer = makeInodeBuffer();
     _oft[oftIdx].buffer = makeDataBuffer();
     _oft[oftIdx].writePtr = writePtr;
@@ -278,7 +275,6 @@ void clearOftEntry(unsigned int oftIdx) {
     _oft[oftIdx].openMode = 0;
     _oft[oftIdx].blockSize = 0;
     _oft[oftIdx].inode = 0;
-    _oft[oftIdx].fdIdx = 0;
     free(_oft[oftIdx].inodeBuffer);
     free(_oft[oftIdx].buffer);
     _oft[oftIdx].writePtr = 0;
@@ -320,11 +316,10 @@ void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int wri
     // Continue to read blocks of file continuously
     unsigned int numWriteItr = writeSize / _fs->blockSize;
     unsigned int i = 0;
-    unsigned int filePos = openFile->filePtr;
     unsigned int currentInodeToLookAt = 1;
     unsigned long freeBlock = -1;
     while (i < numWriteItr) {
-        memcpy(openFile->buffer, buffer + filePos, _fs->blockSize);
+        memcpy(openFile->buffer, buffer + openFile->filePtr, _fs->blockSize);
         if (openFile->openMode == MODE_READ_APPEND) {
             freeBlock = findFreeBlock();
             markBlockBusy(freeBlock);
@@ -338,11 +333,11 @@ void writeFinishFileOntoDisk(TOpenFile *openFile, void *buffer, unsigned int wri
             currentInodeToLookAt += 1;
         }
         writeBlock(openFile->buffer, freeBlock);
-        filePos += _fs->blockSize;
+        openFile->filePtr += _fs->blockSize;
         i += 1;
     }
     openFile->writePtr = writeSize - (i * _fs->blockSize);
-    memcpy(openFile->buffer, buffer + filePos, openFile->writePtr);
+    memcpy(openFile->buffer, buffer + openFile->filePtr, openFile->writePtr);
 }
 
 // Reads the data from the read buffer into the output buffer when the data to read is smaller than the readbuffer.
@@ -372,14 +367,13 @@ void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int read
     unsigned int readItr = curFileLen / _fs->blockSize;
     unsigned int i = 0;
     unsigned int readFileLen = openFile->filePtr;
-    unsigned int filePos = openFile->filePtr;
     unsigned int blockNumber = -1;
     while (i < readItr) {
         readFileLen += _fs->blockSize;
         blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readFileLen);
         readBlock(openFile->buffer, blockNumber);
-        memcpy(buffer + filePos, openFile->buffer, _fs->blockSize);
-        filePos += _fs->blockSize;
+        memcpy(buffer + openFile->filePtr, openFile->buffer, _fs->blockSize);
+        openFile->filePtr += _fs->blockSize;
         i++;
     }
     openFile->readPtr = readSize - readFileLen;
@@ -387,7 +381,7 @@ void readRestOfFileFromDisk(TOpenFile *openFile, void *buffer, unsigned int read
     if (openFile->readPtr) {
         blockNumber = returnBlockNumFromInode(openFile->inodeBuffer, readSize);
         readBlock(openFile->buffer, blockNumber);
-        memcpy(buffer+ filePos, openFile, openFile->readPtr);
+        memcpy(buffer+ openFile->filePtr, openFile, openFile->readPtr);
     }
 }
 

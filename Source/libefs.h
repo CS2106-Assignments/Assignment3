@@ -18,13 +18,12 @@ typedef struct oft
   unsigned char openMode; // Mode selected
   unsigned int blockSize; // Size of each block
   unsigned long inode; // Inode pointer
-  unsigned int fdIdx; // File discriptor id
   unsigned long *inodeBuffer; // Inode buffer
   char *buffer; // Data buffer
   unsigned int writePtr; // Buffer index for writing data
   unsigned int readPtr; // Buffer index for reading data
   unsigned int filePtr; // File pointer. Points relative to ALL data in a file, not just the current buffer
-  const char * filename;
+  const char * filename; // Keep track of file name to find from file descriptor table
 } TOpenFile;
 
 // Mounts a paritition given in fsPartitionName. Must be called before all
